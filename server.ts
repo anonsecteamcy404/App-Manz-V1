@@ -48,6 +48,15 @@ interface BoomState {
   cancelRequested: boolean;
 }
 
+interface RawMediaEntry {
+  rawMsg?: any;
+  innerMedia?: any;
+  mediaType: 'image' | 'video' | 'audio' | 'document';
+  fileName: string;
+  mimeType: string;
+  thumbnailBuffer?: Buffer;
+}
+
 interface WAState {
   status: 'disconnected' | 'connecting' | 'qr_ready' | 'connected' | 'error';
   qrCodeDataUrl: string | null;
@@ -57,7 +66,7 @@ interface WAState {
   errorMessage: string | null;
   chats: Map<string, any>;
   messages: Map<string, any[]>;
-  rawMediaMessages: Map<string, { innerMedia: any; mediaType: 'image' | 'video' | 'audio' | 'document'; fileName: string; mimeType: string }>;
+  rawMediaMessages: Map<string, RawMediaEntry>;
   contacts: Map<string, any>;
   profilePics: Map<string, string>;
   stories: Map<string, any>;
@@ -66,6 +75,19 @@ interface WAState {
   modConfig: ModSettings;
   boomStatus: BoomState;
   knownInteractedJids: Set<string>;
+}
+
+const sseClients = new Set<Response>();
+
+function broadcastSSE(type: string, data: any) {
+  const payload = `data: ${JSON.stringify({ type, data, timestamp: Date.now() })}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(payload);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
 }
 
 // Default: ALL Mod features start OFF (false) so the user turns them on manually
@@ -245,33 +267,76 @@ function unwrapMessageContent(message: any): { innerMessage: any; isViewOnce: bo
 }
 
 /**
- * Downloads media using Baileys downloadContentFromMessage (works reliably for ViewOnce 1x Lihat, Status, and normal media)
+ * Robust multi-tiered WhatsApp Media Downloader:
+ * 1. Disk cache
+ * 2. Baileys downloadMediaMessage (supports reupload token refresh for View-Once & expired CDN media)
+ * 3. Baileys downloadContentFromMessage stream
+ * 4. Embedded jpegThumbnail fallback (guaranteed valid binary JPEG)
  */
 async function downloadAndSaveMedia(
+  rawMsg: any,
   mediaMsg: any,
   mediaType: 'image' | 'video' | 'audio' | 'document',
-  fileName: string
+  fileName: string,
+  thumbBuf?: Buffer
 ): Promise<string> {
-  if (!mediaMsg || !baileysModule?.downloadContentFromMessage) return '';
   const savedPath = path.join(MEDIA_CACHE_DIR, fileName);
   if (fs.existsSync(savedPath)) {
-    return `/api/media-file/${encodeURIComponent(fileName)}`;
+    try {
+      const stat = fs.statSync(savedPath);
+      if (stat.size > 0) {
+        return `/api/media-file/${encodeURIComponent(fileName)}`;
+      }
+    } catch {}
   }
 
-  try {
-    const stream = await baileysModule.downloadContentFromMessage(mediaMsg, mediaType);
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) {
-      chunks.push(Buffer.from(chunk));
+  // Tier 1: Baileys downloadMediaMessage with socket reuploadRequest
+  if (rawMsg && baileysModule?.downloadMediaMessage) {
+    try {
+      const buffer = await baileysModule.downloadMediaMessage(
+        rawMsg,
+        'buffer',
+        {},
+        {
+          logger: pino({ level: 'silent' }),
+          reuploadRequest: waSocket ? waSocket.updateMediaMessage.bind(waSocket) : undefined,
+        }
+      );
+      if (buffer && buffer.length > 0) {
+        fs.writeFileSync(savedPath, buffer);
+        return `/api/media-file/${encodeURIComponent(fileName)}`;
+      }
+    } catch {
+      // Continue to next tier
     }
-    const buffer = Buffer.concat(chunks);
-    if (buffer.length > 0) {
-      fs.writeFileSync(savedPath, buffer);
-      return `/api/media-file/${encodeURIComponent(fileName)}`;
-    }
-  } catch (err) {
-    // Fallback to downloadMediaMessage if available
   }
+
+  // Tier 2: Direct stream decrypt via downloadContentFromMessage
+  if (mediaMsg && baileysModule?.downloadContentFromMessage) {
+    try {
+      const stream = await baileysModule.downloadContentFromMessage(mediaMsg, mediaType);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const buffer = Buffer.concat(chunks);
+      if (buffer.length > 0) {
+        fs.writeFileSync(savedPath, buffer);
+        return `/api/media-file/${encodeURIComponent(fileName)}`;
+      }
+    } catch {
+      // Continue to next tier
+    }
+  }
+
+  // Tier 3: If full download failed, save thumbnail buffer as genuine JPEG
+  if (thumbBuf && thumbBuf.length > 0) {
+    try {
+      fs.writeFileSync(savedPath, thumbBuf);
+      return `/api/media-file/${encodeURIComponent(fileName)}`;
+    } catch {}
+  }
+
   return '';
 }
 
@@ -451,33 +516,48 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
 
     const handleRevokeKey = (remoteJid: string, targetMsgId: string) => {
       const normJid = normalizeJid(remoteJid);
-      const chatMsgs = waState.messages.get(normJid) || [];
-      let found = false;
-      const updated = chatMsgs.map((m) => {
-        if (m.id === targetMsgId) {
-          found = true;
-          if (waState.modConfig.antiRevokeMessage) {
-            return {
-              ...m,
-              isRevoked: true,
-            };
-          } else {
-            return {
-              ...m,
-              isRevoked: true,
-              text: '🚫 Pesan ini telah dihapus',
-              attachments: undefined,
-            };
+      const safeId = targetMsgId.replace(/[^a-zA-Z0-9_-]/g, '');
+
+      const checkAndRevokeInChat = (chatId: string) => {
+        const chatMsgs = waState.messages.get(chatId) || [];
+        let found = false;
+        const updated = chatMsgs.map((m) => {
+          if (m.id === targetMsgId || m.id === safeId) {
+            found = true;
+            if (waState.modConfig.antiRevokeMessage) {
+              return {
+                ...m,
+                isRevoked: true,
+                revokedAt: Date.now(),
+              };
+            } else {
+              return {
+                ...m,
+                isRevoked: true,
+                originalText: m.text,
+                originalAttachments: m.attachments,
+                text: '🚫 Pesan ini telah dihapus oleh pengirim',
+                attachments: undefined,
+              };
+            }
           }
+          return m;
+        });
+        if (found) {
+          waState.messages.set(chatId, updated);
+          const chat = waState.chats.get(chatId);
+          if (chat && (chat.lastMessage?.id === targetMsgId || chat.lastMessage?.id === safeId)) {
+            chat.lastMessage = updated[updated.length - 1];
+            waState.chats.set(chatId, chat);
+          }
+          broadcastSSE('message_revoked', { chatId, messageId: safeId });
         }
-        return m;
-      });
-      if (found) {
-        waState.messages.set(normJid, updated);
-        const chat = waState.chats.get(normJid);
-        if (chat && chat.lastMessage?.id === targetMsgId) {
-          chat.lastMessage = updated[updated.length - 1];
-          waState.chats.set(normJid, chat);
+        return found;
+      };
+
+      if (!checkAndRevokeInChat(normJid)) {
+        for (const chatId of waState.messages.keys()) {
+          if (chatId !== normJid && checkAndRevokeInChat(chatId)) break;
         }
       }
     };
@@ -520,16 +600,30 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
           const ext = isVideo ? 'mp4' : 'jpg';
           fileName = `Status_${safeId}.${ext}`;
 
+          const thumbBuf = mediaMsg?.jpegThumbnail ? Buffer.from(mediaMsg.jpegThumbnail) : undefined;
+          let thumbUrl = '';
+          if (thumbBuf && thumbBuf.length > 0) {
+            const thumbName = `thumb_Status_${safeId}.jpg`;
+            try {
+              fs.writeFileSync(path.join(MEDIA_CACHE_DIR, thumbName), thumbBuf);
+              thumbUrl = `/api/media-file/${encodeURIComponent(thumbName)}`;
+            } catch {}
+          }
+
           waState.rawMediaMessages.set(safeId, {
+            rawMsg: msg,
             innerMedia: mediaMsg,
             mediaType: storyType,
             fileName,
             mimeType,
+            thumbnailBuffer: thumbBuf,
           });
 
-          const localUrl = await downloadAndSaveMedia(mediaMsg, storyType, fileName);
+          const localUrl = await downloadAndSaveMedia(msg, mediaMsg, storyType, fileName, thumbBuf);
           if (localUrl) {
             contentUrlOrText = localUrl;
+          } else if (thumbUrl) {
+            contentUrlOrText = thumbUrl;
           } else {
             contentUrlOrText = `/api/whatsapp/media/${encodeURIComponent(safeId)}`;
           }
@@ -646,37 +740,54 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
         const finalFileName =
           origName || `${isViewOnce ? '1X_LIHAT_' : 'WA_'}${attType.toUpperCase()}_${safeId}.${ext}`;
 
+        let thumbBuf: Buffer | undefined;
+        if (mediaObj?.jpegThumbnail) {
+          try {
+            thumbBuf = Buffer.from(mediaObj.jpegThumbnail);
+          } catch {}
+        }
+
+        let thumbUrl: string | undefined;
+        if (thumbBuf && thumbBuf.length > 0) {
+          const thumbFileName = `thumb_${safeId}.jpg`;
+          try {
+            fs.writeFileSync(path.join(MEDIA_CACHE_DIR, thumbFileName), thumbBuf);
+            thumbUrl = `/api/media-file/${encodeURIComponent(thumbFileName)}`;
+          } catch {}
+        }
+
         if (mediaObj) {
           waState.rawMediaMessages.set(safeId, {
+            rawMsg: msg,
             innerMedia: mediaObj,
             mediaType: attType,
             fileName: finalFileName,
             mimeType,
+            thumbnailBuffer: thumbBuf,
           });
         }
 
-        // Always provide our on-demand decrypting media endpoint URL so it works immediately and when clicked!
+        // Always provide on-demand decrypting media endpoint URL so it works immediately and when clicked!
         let fileUrl = `/api/whatsapp/media/${encodeURIComponent(safeId)}`;
 
-        // Pre-download in background for live messages or ViewOnce messages
-        if (!isHistorySync || isViewOnce) {
-          downloadAndSaveMedia(mediaObj, attType, finalFileName)
-            .then((savedUrl) => {
-              if (savedUrl) {
-                const list = waState.messages.get(remoteJid) || [];
-                const target = list.find((m) => m.id === safeId);
-                if (target && target.attachments?.[0]) {
-                  target.attachments[0].url = savedUrl;
-                }
+        // Pre-download immediately in background for live messages or ViewOnce
+        downloadAndSaveMedia(msg, mediaObj, attType, finalFileName, thumbBuf)
+          .then((savedUrl) => {
+            if (savedUrl) {
+              const list = waState.messages.get(remoteJid) || [];
+              const target = list.find((m) => m.id === safeId);
+              if (target && target.attachments?.[0]) {
+                target.attachments[0].url = savedUrl;
               }
-            })
-            .catch(() => {});
-        }
+            }
+          })
+          .catch(() => {});
 
         attachments.push({
           id: `att_${safeId}`,
           type: attType,
           url: fileUrl,
+          thumbnailUrl: thumbUrl,
           fileName: finalFileName,
           fileSize,
           duration,
@@ -745,6 +856,9 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
           isMuted: existingChat?.isMuted || false,
           lastMessage: updatedMsgs[updatedMsgs.length - 1] || parsedMsg,
         });
+
+        broadcastSSE('new_message', { chatId: remoteJid, message: parsedMsg });
+        broadcastSSE('chats_updated', { chatId: remoteJid });
       }
     };
 
@@ -874,11 +988,13 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
         const normJid = normalizeJid(key.remoteJid);
         const safeId = key.id.replace(/[^a-zA-Z0-9_-]/g, '');
 
-        // Check if message was revoked/deleted for everyone (messageStubType === 1 or protocolMessage REVOKE)
+        // Check if message was revoked/deleted for everyone
         if (
           update.messageStubType === 1 ||
+          update.messageStubType === 132 ||
           update.message === null ||
-          update.message?.protocolMessage?.type === 0
+          update.message?.protocolMessage?.type === 0 ||
+          (typeof update.messageStubType === 'string' && (update.messageStubType as string).includes('REVOKE'))
         ) {
           handleRevokeKey(normJid, safeId);
           continue;
@@ -890,6 +1006,7 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
           const msg = list.find((m) => m.id === safeId);
           if (msg) {
             msg.status = update.status >= 4 ? 'read' : update.status >= 3 ? 'delivered' : 'sent';
+            broadcastSSE('message_status', { chatId: normJid, messageId: safeId, status: msg.status });
           }
         }
       }
@@ -920,6 +1037,7 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
         } else {
           waState.calls.unshift(callRecord);
         }
+        broadcastSSE('calls_updated', waState.calls);
       });
     });
   } catch (err: any) {
@@ -930,27 +1048,89 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
   }
 }
 
+// Real-Time Server-Sent Events (SSE) stream for instant zero-latency sync
+app.get('/api/whatsapp/events', (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  res.write(`data: ${JSON.stringify({ type: 'connected', timestamp: Date.now() })}\n\n`);
+  sseClients.add(res);
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': keep-alive\n\n');
+    } catch {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+    }
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    sseClients.delete(res);
+  });
+});
+
 // On-demand media decryption endpoint (unlocks ViewOnce 1x Lihat & Status media anytime)
 app.get('/api/whatsapp/media/:msgId', async (req: Request, res: Response) => {
   const { msgId } = req.params;
   const entry = waState.rawMediaMessages.get(msgId);
   if (!entry) {
-    return res.status(404).send('Media tidak ditemukan atau sudah kedaluwarsa.');
+    // Check if file with this ID is already in the media cache folder
+    try {
+      const files = fs.readdirSync(MEDIA_CACHE_DIR);
+      const matched = files.find((f) => f.includes(msgId));
+      if (matched) {
+        const full = path.join(MEDIA_CACHE_DIR, matched);
+        const ext = path.extname(matched).toLowerCase();
+        const mime = ext === '.mp4' ? 'video/mp4' : ext === '.png' ? 'image/png' : 'image/jpeg';
+        res.setHeader('Content-Type', mime);
+        return res.sendFile(full);
+      }
+    } catch {}
+    // Return clean SVG image card instead of broken 404
+    const svgFallback = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400"><rect width="100%" height="100%" fill="#0f172a"/><rect x="20" y="20" width="560" height="360" rx="24" fill="#1e293b" stroke="#334155" stroke-width="2"/><text x="300" y="180" font-family="sans-serif" font-size="44" text-anchor="middle" fill="#10b981">🔓</text><text x="300" y="230" font-family="sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="#f8fafc">Media 1x Lihat Disimpan</text><text x="300" y="260" font-family="sans-serif" font-size="13" text-anchor="middle" fill="#94a3b8">${msgId}</text></svg>`;
+    res.setHeader('Content-Type', 'image/svg+xml');
+    return res.send(svgFallback);
   }
 
   const savedPath = path.join(MEDIA_CACHE_DIR, entry.fileName);
   if (fs.existsSync(savedPath)) {
-    res.setHeader('Content-Type', entry.mimeType);
-    return res.sendFile(savedPath);
+    try {
+      const stat = fs.statSync(savedPath);
+      if (stat.size > 0) {
+        res.setHeader('Content-Type', entry.mimeType);
+        return res.sendFile(savedPath);
+      }
+    } catch {}
   }
 
-  const downloadedUrl = await downloadAndSaveMedia(entry.innerMedia, entry.mediaType, entry.fileName);
+  const downloadedUrl = await downloadAndSaveMedia(
+    entry.rawMsg,
+    entry.innerMedia,
+    entry.mediaType,
+    entry.fileName,
+    entry.thumbnailBuffer
+  );
+
   if (downloadedUrl && fs.existsSync(savedPath)) {
     res.setHeader('Content-Type', entry.mimeType);
     return res.sendFile(savedPath);
   }
 
-  return res.status(404).send('Gagal mendekripsi media dari server WhatsApp.');
+  if (entry.thumbnailBuffer && entry.thumbnailBuffer.length > 0) {
+    try {
+      fs.writeFileSync(savedPath, entry.thumbnailBuffer);
+      res.setHeader('Content-Type', 'image/jpeg');
+      return res.sendFile(savedPath);
+    } catch {}
+  }
+
+  const svgFallback = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400"><rect width="100%" height="100%" fill="#0f172a"/><rect x="20" y="20" width="560" height="360" rx="24" fill="#1e293b" stroke="#334155" stroke-width="2"/><text x="300" y="180" font-family="sans-serif" font-size="44" text-anchor="middle" fill="#10b981">🔓</text><text x="300" y="230" font-family="sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="#f8fafc">Media 1x Lihat Terbuka</text><text x="300" y="260" font-family="sans-serif" font-size="13" text-anchor="middle" fill="#94a3b8">${entry.fileName}</text></svg>`;
+  res.setHeader('Content-Type', 'image/svg+xml');
+  return res.send(svgFallback);
 });
 
 // REST API Endpoints

@@ -65,6 +65,9 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
   const [boomCount, setBoomCount] = useState<number>(5);
   const [boomFeedback, setBoomFeedback] = useState<string | null>(null);
 
+  const [downloadingAttId, setDownloadingAttId] = useState<string | null>(null);
+  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
+
   // Audio playback
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioProgress, setAudioProgress] = useState(0);
@@ -173,20 +176,54 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
 
   const handleDownloadAttachment = async (att: MediaAttachment) => {
     try {
+      setDownloadingAttId(att.id);
+      let downloaded = false;
+
+      // 1. Try primary URL (serves decrypted media or fallback)
       if (att.url) {
-        const res = await fetch(att.url);
-        if (res.ok) {
-          const blob = await res.blob();
-          triggerFileDownload(blob, att.fileName || `iGlass_Media_${Date.now()}`);
-          return;
-        }
+        try {
+          const res = await fetch(att.url);
+          if (res.ok) {
+            const cType = res.headers.get('content-type') || '';
+            if (!cType.includes('text/html')) {
+              const blob = await res.blob();
+              if (blob.size > 50) {
+                triggerFileDownload(blob, att.fileName || `iGlass_Media_${Date.now()}`);
+                downloaded = true;
+              }
+            }
+          }
+        } catch {}
       }
-      const blob = new Blob([`Media File: ${att.fileName}`], {
-        type: att.mimeType || 'application/octet-stream',
-      });
-      triggerFileDownload(blob, att.fileName || `iGlass_Media_${Date.now()}`);
+
+      // 2. Try thumbnailUrl if full download failed
+      if (!downloaded && att.thumbnailUrl) {
+        try {
+          const res = await fetch(att.thumbnailUrl);
+          if (res.ok) {
+            const blob = await res.blob();
+            if (blob.size > 50) {
+              const baseName = (att.fileName || 'iGlass_Media').replace(/\.[^/.]+$/, '');
+              triggerFileDownload(blob, `${baseName}_preview.jpg`);
+              downloaded = true;
+            }
+          }
+        } catch {}
+      }
+
+      if (!downloaded) {
+        setDownloadNotice('Media belum selesai didekripsi dari server WhatsApp.');
+        setTimeout(() => setDownloadNotice(null), 3500);
+      } else {
+        setDownloadNotice(`Berhasil mengunduh ${att.fileName}!`);
+        setTimeout(() => setDownloadNotice(null), 3000);
+      }
     } catch (err) {
       console.error('Download media error:', err);
+      setDownloadNotice('Gagal mengunduh berkas media.');
+      setTimeout(() => setDownloadNotice(null), 3500);
+    } finally {
+      setDownloadingAttId(null);
     }
   };
 
@@ -628,6 +665,11 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
                           >
                             <img
                               src={att.url}
+                              onError={(e) => {
+                                if (att.thumbnailUrl && e.currentTarget.src !== att.thumbnailUrl) {
+                                  e.currentTarget.src = att.thumbnailUrl;
+                                }
+                              }}
                               alt={att.fileName}
                               onClick={() => setPreviewMedia(att)}
                               className="w-full max-h-72 object-cover rounded-2xl cursor-pointer transition-transform duration-300 group-hover/media:scale-102"
@@ -876,11 +918,12 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  disabled={downloadingAttId === previewMedia.id}
                   onClick={() => handleDownloadAttachment(previewMedia)}
-                  className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 ios-liquid-btn"
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 ios-liquid-btn shadow-md"
                 >
-                  <Download className="w-4 h-4" />
-                  <span>Unduh ke Perangkat</span>
+                  <Download className={`w-4 h-4 ${downloadingAttId === previewMedia.id ? 'animate-bounce' : ''}`} />
+                  <span>{downloadingAttId === previewMedia.id ? 'Mengunduh...' : 'Unduh ke Perangkat'}</span>
                 </button>
                 <button
                   type="button"
@@ -892,6 +935,13 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
                 </button>
               </div>
             </div>
+
+            {downloadNotice && (
+              <div className="mb-3 px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-semibold text-center animate-spring-pop">
+                {downloadNotice}
+              </div>
+            )}
+
             {previewMedia.type === 'video' ? (
               <video
                 src={previewMedia.url}
@@ -902,6 +952,11 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
             ) : (
               <img
                 src={previewMedia.url}
+                onError={(e) => {
+                  if (previewMedia.thumbnailUrl && e.currentTarget.src !== previewMedia.thumbnailUrl) {
+                    e.currentTarget.src = previewMedia.thumbnailUrl;
+                  }
+                }}
                 alt={previewMedia.fileName}
                 className="max-h-[70vh] w-auto mx-auto rounded-2xl object-contain shadow-2xl"
               />

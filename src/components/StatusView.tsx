@@ -20,13 +20,18 @@ export const StatusView: React.FC = () => {
       if (item.type === 'image' || item.type === 'video') {
         const res = await fetch(item.content);
         if (res.ok) {
-          const blob = await res.blob();
-          const ext = item.type === 'video' ? 'mp4' : 'jpg';
-          triggerFileDownload(
-            blob,
-            item.fileName || `Status_${contactName.replace(/\s+/g, '_')}_${Date.now()}.${ext}`
-          );
-          return;
+          const contentType = res.headers.get('content-type') || '';
+          if (!contentType.includes('text/html')) {
+            const blob = await res.blob();
+            if (blob.size > 50) {
+              const ext = item.type === 'video' ? 'mp4' : 'jpg';
+              triggerFileDownload(
+                blob,
+                item.fileName || `Status_${contactName.replace(/\s+/g, '_')}_${Date.now()}.${ext}`
+              );
+              return;
+            }
+          }
         }
       }
       const textBlob = new Blob(

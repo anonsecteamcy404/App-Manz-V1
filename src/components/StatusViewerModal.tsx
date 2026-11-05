@@ -66,24 +66,28 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({ story, onC
     if (!currentItem) return;
     setIsPaused(true);
     try {
-      if (
-        (currentItem.type === 'image' || currentItem.type === 'video') &&
-        currentItem.content.startsWith('/api/media-file/')
-      ) {
+      if (currentItem.type === 'image' || currentItem.type === 'video') {
         const res = await fetch(currentItem.content);
-        const blob = await res.blob();
-        const ext = currentItem.type === 'video' ? 'mp4' : 'jpg';
-        triggerFileDownload(
-          blob,
-          currentItem.fileName || `Status_${story.contactName.replace(/\s+/g, '_')}_${Date.now()}.${ext}`
-        );
-      } else {
-        const blob = new Blob(
-          [`Status dari ${story.contactName}\nWaktu: ${currentItem.timestamp}\nIsi: ${currentItem.content}\nCaption: ${currentItem.caption || ''}`],
-          { type: 'text/plain;charset=utf-8' }
-        );
-        triggerFileDownload(blob, `Status_${story.contactName.replace(/\s+/g, '_')}_${Date.now()}.txt`);
+        if (res.ok) {
+          const contentType = res.headers.get('content-type') || '';
+          if (!contentType.includes('text/html')) {
+            const blob = await res.blob();
+            if (blob.size > 50) {
+              const ext = currentItem.type === 'video' ? 'mp4' : 'jpg';
+              triggerFileDownload(
+                blob,
+                currentItem.fileName || `Status_${story.contactName.replace(/\s+/g, '_')}_${Date.now()}.${ext}`
+              );
+              return;
+            }
+          }
+        }
       }
+      const blob = new Blob(
+        [`Status dari ${story.contactName}\nWaktu: ${currentItem.timestamp}\nIsi: ${currentItem.content}\nCaption: ${currentItem.caption || ''}`],
+        { type: 'text/plain;charset=utf-8' }
+      );
+      triggerFileDownload(blob, `Status_${story.contactName.replace(/\s+/g, '_')}_${Date.now()}.txt`);
     } catch (err) {
       console.error('Status download failed:', err);
     } finally {

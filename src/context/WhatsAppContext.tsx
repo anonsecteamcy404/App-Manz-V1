@@ -257,9 +257,123 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }).catch(() => {});
   }, []);
 
-  // Poll real WhatsApp backend state continuously
+  // Real-Time Server-Sent Events (SSE) + fast polling backup for 100% instant sync
   useEffect(() => {
     let isMounted = true;
+    let eventSource: EventSource | null = null;
+
+    const setupSSE = () => {
+      try {
+        eventSource = new EventSource('/api/whatsapp/events');
+        eventSource.onmessage = (event) => {
+          if (!isMounted) return;
+          try {
+            const parsed = JSON.parse(event.data);
+            if (parsed.type === 'new_message' && parsed.data?.message) {
+              const { chatId, message } = parsed.data;
+              setChats((prev) => {
+                let chatFound = false;
+                const next = prev.map((c) => {
+                  if (c.id === chatId) {
+                    chatFound = true;
+                    const exists = c.messages.some((m) => m.id === message.id);
+                    const updatedMsgs = exists ? c.messages : [...c.messages, message];
+                    return {
+                      ...c,
+                      messages: updatedMsgs,
+                      lastMessage: message,
+                      unreadCount: message.isOutgoing ? 0 : c.unreadCount + 1,
+                    };
+                  }
+                  return c;
+                });
+                if (!chatFound) {
+                  // Fetch updated chats list if new chat
+                  fetchChatsData();
+                }
+                return next;
+              });
+            } else if (parsed.type === 'message_revoked' && parsed.data?.messageId) {
+              const { chatId, messageId } = parsed.data;
+              setChats((prev) =>
+                prev.map((c) => {
+                  if (c.id === chatId) {
+                    return {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === messageId ? { ...m, isRevoked: true } : m
+                      ),
+                    };
+                  }
+                  return c;
+                })
+              );
+            } else if (parsed.type === 'message_status' && parsed.data?.messageId) {
+              const { chatId, messageId, status } = parsed.data;
+              setChats((prev) =>
+                prev.map((c) => {
+                  if (c.id === chatId) {
+                    return {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === messageId ? { ...m, status } : m
+                      ),
+                    };
+                  }
+                  return c;
+                })
+              );
+            } else if (parsed.type === 'stories_updated') {
+              fetch('/api/whatsapp/chats')
+                .then((r) => r.json())
+                .then((d) => {
+                  if (isMounted && Array.isArray(d.stories)) setStories(d.stories);
+                })
+                .catch(() => {});
+            } else if (parsed.type === 'chats_updated') {
+              fetchChatsData();
+            }
+          } catch {}
+        };
+
+        eventSource.onerror = () => {
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
+          // Retry SSE in 3 seconds
+          if (isMounted) {
+            setTimeout(setupSSE, 3000);
+          }
+        };
+      } catch {}
+    };
+
+    const fetchChatsData = async () => {
+      try {
+        const chatRes = await fetch('/api/whatsapp/chats');
+        if (!chatRes.ok || !isMounted) return;
+        const chatData = await chatRes.json();
+        if (Array.isArray(chatData.chats)) {
+          setChats((prev) => {
+            const serverIds = new Set(chatData.chats.map((c: Chat) => c.id));
+            const localOnly = prev.filter((p) => !serverIds.has(p.id));
+            return [...chatData.chats, ...localOnly];
+          });
+          setActiveChatId((curr) => curr || chatData.chats[0]?.id || null);
+        }
+        if (Array.isArray(chatData.contacts)) {
+          setContacts(chatData.contacts);
+        }
+        if (Array.isArray(chatData.stories)) {
+          setStories(chatData.stories);
+        }
+        if (Array.isArray(chatData.calls)) {
+          setCalls(chatData.calls);
+        }
+      } catch {}
+    };
+
     const pollBackend = async () => {
       try {
         const res = await fetch('/api/whatsapp/status');
@@ -295,39 +409,22 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               phoneNumber: data.user.phone || `+${data.user.id.split('@')[0]}`,
             });
           }
-
-          // Fetch real chats, stories, contacts, calls
-          const chatRes = await fetch('/api/whatsapp/chats');
-          if (chatRes.ok) {
-            const chatData = await chatRes.json();
-            if (Array.isArray(chatData.chats)) {
-              setChats((prev) => {
-                const serverIds = new Set(chatData.chats.map((c: Chat) => c.id));
-                const localOnly = prev.filter((p) => !serverIds.has(p.id));
-                return [...chatData.chats, ...localOnly];
-              });
-              setActiveChatId((curr) => curr || chatData.chats[0]?.id || null);
-            }
-            if (Array.isArray(chatData.contacts)) {
-              setContacts(chatData.contacts);
-            }
-            if (Array.isArray(chatData.stories)) {
-              setStories(chatData.stories);
-            }
-            if (Array.isArray(chatData.calls)) {
-              setCalls(chatData.calls);
-            }
-          }
+          await fetchChatsData();
         } else if (data.status === 'disconnected') {
           setConnectionState('disconnected');
         }
       } catch {}
     };
 
+    setupSSE();
     pollBackend();
-    const interval = setInterval(pollBackend, 1500);
+    const interval = setInterval(pollBackend, 1200);
+
     return () => {
       isMounted = false;
+      if (eventSource) {
+        eventSource.close();
+      }
       clearInterval(interval);
     };
   }, []);
