@@ -13,6 +13,7 @@ import {
   Sparkles,
   UserPlus,
   Activity,
+  Power,
 } from 'lucide-react';
 
 export const ModSettingsView: React.FC = () => {
@@ -33,74 +34,116 @@ export const ModSettingsView: React.FC = () => {
     key: keyof typeof modConfig.antiBanGuard,
     value: boolean | number
   ) => {
+    const nextGuard = {
+      ...modConfig.antiBanGuard,
+      [key]: value,
+    };
+    // Automatically enable master guard if any sub-feature is turned on
+    if (typeof value === 'boolean' && value === true && key !== 'enabled') {
+      nextGuard.enabled = true;
+    }
     updateModConfig({
+      antiBanGuard: nextGuard,
+    });
+    triggerSaved();
+  };
+
+  const handleSetAllFeatures = (turnOn: boolean) => {
+    updateModConfig({
+      antiBlueTick: turnOn,
+      antiBlueTickOnReply: turnOn,
+      antiViewOnce: turnOn,
+      autoSaveStatus: turnOn,
+      antiRevokeMessage: turnOn,
+      hideOnlineStatus: turnOn,
       antiBanGuard: {
         ...modConfig.antiBanGuard,
-        [key]: value,
+        enabled: turnOn,
+        humanTypingSimulation: turnOn,
+        adaptiveJitterDelay: turnOn,
+        invisibleZeroWidthVariation: turnOn,
+        autoWarmupNewContacts: turnOn,
       },
     });
     triggerSaved();
   };
 
+  const activeCount = [
+    modConfig.antiBlueTick,
+    modConfig.antiBlueTickOnReply,
+    modConfig.antiViewOnce,
+    modConfig.autoSaveStatus,
+    modConfig.antiRevokeMessage,
+    modConfig.hideOnlineStatus,
+    modConfig.antiBanGuard.enabled,
+  ].filter(Boolean).length;
+
   return (
-    <div className="flex-1 overflow-y-auto p-4 md:p-8 max-w-5xl mx-auto w-full space-y-6">
+    <div className="flex-1 overflow-y-auto p-4 md:p-8 max-w-5xl mx-auto w-full space-y-6 animate-spring-pop">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-3xl ios-glass-card">
         <div>
           <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[10px] font-extrabold uppercase tracking-wider">
-              iGlass Mod Engine v2.5
+            <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-500 dark:text-emerald-300 text-[10px] font-extrabold uppercase tracking-wider">
+              iGlass Liquid Mod v3.0
+            </span>
+            <span className="px-2.5 py-0.5 rounded-full ios-glass-subtle text-[10px] font-bold text-slate-600 dark:text-slate-300">
+              {activeCount} / 7 Modul Aktif
             </span>
             {savedToast && (
-              <span className="px-2.5 py-0.5 rounded-full bg-teal-500/20 border border-teal-400/30 text-teal-300 text-[10px] font-bold flex items-center gap-1 animate-in fade-in">
-                <CheckCircle2 className="w-3 h-3" /> Tersimpan ke Server WA
+              <span className="px-2.5 py-0.5 rounded-full bg-teal-500/20 border border-teal-400/30 text-teal-400 text-[10px] font-bold flex items-center gap-1 animate-spring-pop">
+                <CheckCircle2 className="w-3 h-3" /> Tersinkron ke Server WA
               </span>
             )}
           </div>
-          <h2 className="text-xl md:text-2xl font-extrabold text-slate-900 dark:text-white mt-1">
-            Pusat Mod Privasi & Proteksi Anti-Ban
+          <h2 className="text-xl md:text-2xl font-extrabold text-slate-900 dark:text-white mt-1.5 tracking-tight">
+            Pusat Kontrol Mod Privasi & Anti-Ban
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Atur fitur siluman (Stealth), pembuka foto/video 1x lihat otomatis, dan algoritma pelindung akun dari blokir/spam WhatsApp.
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Secara bawaan seluruh fitur diatur <strong>OFF</strong>. Nyalakan fitur yang Anda butuhkan secara manual atau aktifkan sekaligus.
           </p>
         </div>
 
-        {/* Active Protection Summary Pill */}
-        <div className="px-4 py-2.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center gap-3 shrink-0">
-          <div className="w-9 h-9 rounded-xl bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/25">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400">
-              Anti-Ban & Anti-Limit Aktif
-            </p>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400">
-              Jeda Jitter {modConfig.antiBanGuard.minDelayMs}–{modConfig.antiBanGuard.maxDelayMs}ms · Zero-Width Hash
-            </p>
-          </div>
+        {/* Master 1-Click Enable / Disable All Buttons */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => handleSetAllFeatures(true)}
+            className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white text-xs font-extrabold shadow-lg shadow-emerald-500/25 flex items-center gap-1.5 ios-liquid-btn"
+          >
+            <Power className="w-3.5 h-3.5" />
+            <span>Nyalakan Semua</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSetAllFeatures(false)}
+            className="px-3.5 py-2.5 rounded-2xl ios-glass-subtle hover:bg-rose-500/15 text-slate-700 dark:text-slate-200 hover:text-rose-400 text-xs font-bold ios-liquid-btn"
+          >
+            Matikan Semua
+          </button>
         </div>
       </div>
 
       {/* Live Chat Boom Monitor if active */}
       {boomStatus.isRunning && (
-        <div className="p-4 rounded-3xl bg-amber-500/15 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="p-4 rounded-3xl ios-liquid-capsule text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-spring-pop">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500 text-white flex items-center justify-center animate-pulse">
-              <Zap className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center animate-pulse">
+              <Zap className="w-5 h-5 fill-current" />
             </div>
             <div>
-              <p className="text-xs font-bold text-amber-600 dark:text-amber-300">
+              <p className="text-xs font-extrabold text-amber-300">
                 Chat Boom Sedang Berjalan ({boomStatus.sent}/{boomStatus.total} terkirim)
               </p>
-              <p className="text-[11px] text-slate-600 dark:text-slate-300">
-                Pesan: "{boomStatus.text || ''}" — Dijaga oleh jeda Anti-Ban otomatis
+              <p className="text-[11px] text-white/80">
+                Pesan: "{boomStatus.text || ''}"
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={stopChatBoom}
-            className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold shrink-0"
+            className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold shrink-0 ios-liquid-btn"
           >
             Hentikan Boom
           </button>
@@ -109,16 +152,16 @@ export const ModSettingsView: React.FC = () => {
 
       {/* Grid Section 1: WhatsApp Mod & Stealth Features */}
       <div className="space-y-3">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-500 flex items-center gap-1.5">
+        <h3 className="text-xs font-extrabold uppercase tracking-wider text-emerald-500 flex items-center gap-1.5 px-1">
           <Sparkles className="w-3.5 h-3.5" />
-          <span>1. Fitur Mod Privasi & Media Siluman</span>
+          <span>1. Modul Privasi Siluman & Pembuka Media</span>
         </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Anti Blue Tick on Read */}
-          <div className="p-4 rounded-3xl ios-glass-card border border-white/20 flex items-start justify-between gap-4">
+          <div className="p-4 rounded-3xl ios-glass-card flex items-start justify-between gap-4">
             <div className="flex items-start gap-3.5">
-              <div className="w-10 h-10 rounded-2xl bg-sky-500/20 text-sky-400 flex items-center justify-center shrink-0 mt-0.5">
+              <div className="w-11 h-11 rounded-2xl bg-sky-500/20 text-sky-400 border border-sky-400/30 flex items-center justify-center shrink-0 mt-0.5 shadow-inner">
                 <EyeOff className="w-5 h-5" />
               </div>
               <div>
@@ -126,20 +169,26 @@ export const ModSettingsView: React.FC = () => {
                   <h4 className="text-sm font-bold text-slate-900 dark:text-white">
                     Anti Centang Biru (Saat Buka Chat)
                   </h4>
-                  <span className="px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-bold">
-                    Stealth
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                      modConfig.antiBlueTick
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'bg-slate-500/20 text-slate-400'
+                    }`}
+                  >
+                    {modConfig.antiBlueTick ? 'ON' : 'OFF'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  Walaupun Anda sudah membuka dan membaca pesan lawan bicara, di HP mereka tetap centang dua abu-abu (belum dibaca).
+                  Saat Anda membuka dan membaca pesan lawan bicara, di HP mereka tetap centang dua abu-abu.
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => handleToggleMod('antiBlueTick', !modConfig.antiBlueTick)}
-              className={`w-12 h-7 rounded-full transition-colors p-1 shrink-0 ${
-                modConfig.antiBlueTick ? 'bg-emerald-500' : 'bg-slate-600/40'
+              className={`w-12 h-7 rounded-full transition-colors p-1 shrink-0 ios-liquid-btn ${
+                modConfig.antiBlueTick ? 'bg-emerald-500 shadow-lg shadow-emerald-500/30' : 'bg-slate-600/40'
               }`}
               aria-label="Toggle Anti Centang Biru Saat Buka Chat"
             >
@@ -152,30 +201,38 @@ export const ModSettingsView: React.FC = () => {
           </div>
 
           {/* Anti Blue Tick even after Reply */}
-          <div className="p-4 rounded-3xl ios-glass-card border border-white/20 flex items-start justify-between gap-4">
+          <div className="p-4 rounded-3xl ios-glass-card flex items-start justify-between gap-4">
             <div className="flex items-start gap-3.5">
-              <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center shrink-0 mt-0.5">
+              <div className="w-11 h-11 rounded-2xl bg-indigo-500/20 text-indigo-400 border border-indigo-400/30 flex items-center justify-center shrink-0 mt-0.5 shadow-inner">
                 <EyeOff className="w-5 h-5" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
                   <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                    Anti Centang Biru (Walaupun Sudah Balas)
+                    Anti Centang Biru (Saat Balas Chat)
                   </h4>
-                  <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 text-[10px] font-bold">
-                    Super Stealth
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                      modConfig.antiBlueTickOnReply
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'bg-slate-500/20 text-slate-400'
+                    }`}
+                  >
+                    {modConfig.antiBlueTickOnReply ? 'ON' : 'OFF'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  Tetap tahan pengiriman receipt baca (read receipt) bahkan setelah Anda membalas chat mereka. Pesan lawan tetap tidak centang biru!
+                  Walaupun Anda sudah membalas pesan mereka, pesan lawan bicara tetap tidak berubah menjadi centang biru.
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => handleToggleMod('antiBlueTickOnReply', !modConfig.antiBlueTickOnReply)}
-              className={`w-12 h-7 rounded-full transition-colors p-1 shrink-0 ${
-                modConfig.antiBlueTickOnReply ? 'bg-emerald-500' : 'bg-slate-600/40'
+              className={`w-12 h-7 rounded-full transition-colors p-1 shrink-0 ios-liquid-btn ${
+                modConfig.antiBlueTickOnReply
+                  ? 'bg-emerald-500 shadow-lg shadow-emerald-500/30'
+                  : 'bg-slate-600/40'
               }`}
               aria-label="Toggle Anti Centang Biru Saat Balas"
             >
@@ -188,9 +245,9 @@ export const ModSettingsView: React.FC = () => {
           </div>
 
           {/* Anti View Once (1x Lihat Unlocker) */}
-          <div className="p-4 rounded-3xl ios-glass-card border border-white/20 flex items-start justify-between gap-4">
+          <div className="p-4 rounded-3xl ios-glass-card flex items-start justify-between gap-4">
             <div className="flex items-start gap-3.5">
-              <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+              <div className="w-11 h-11 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-400/30 flex items-center justify-center shrink-0 mt-0.5 shadow-inner">
                 <LockOpen className="w-5 h-5" />
               </div>
               <div>
@@ -198,20 +255,28 @@ export const ModSettingsView: React.FC = () => {
                   <h4 className="text-sm font-bold text-slate-900 dark:text-white">
                     Buka & Unduh Foto/Video 1x Lihat
                   </h4>
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">
-                    Anti View-Once
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                      modConfig.antiViewOnce
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'bg-slate-500/20 text-slate-400'
+                    }`}
+                  >
+                    {modConfig.antiViewOnce ? 'ON' : 'OFF'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  Membuka kunci semua foto, video, dan voice note sekali lihat (1x lihat) secara otomatis agar bisa dilihat berkali-kali & diunduh langsung.
+                  Membuka kunci semua foto, video, dan voice note sekali lihat (1x lihat) secara otomatis agar bisa dilihat & diunduh berkali-kali.
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => handleToggleMod('antiViewOnce', !modConfig.antiViewOnce)}
-              className={`w-12 h-7 rounded-full transition-colors p-1 shrink-0 ${
-                modConfig.antiViewOnce ? 'bg-emerald-500' : 'bg-slate-600/40'
+              className={`w-12 h-7 rounded-full transition-colors p-1 shrink-0 ios-liquid-btn ${
+                modConfig.antiViewOnce
+                  ? 'bg-emerald-500 shadow-lg shadow-emerald-500/30'
+                  : 'bg-slate-600/40'
               }`}
               aria-label="Toggle Buka 1x Lihat"
             >
@@ -224,9 +289,9 @@ export const ModSettingsView: React.FC = () => {
           </div>
 
           {/* Status Downloader */}
-          <div className="p-4 rounded-3xl ios-glass-card border border-white/20 flex items-start justify-between gap-4">
+          <div className="p-4 rounded-3xl ios-glass-card flex items-start justify-between gap-4">
             <div className="flex items-start gap-3.5">
-              <div className="w-10 h-10 rounded-2xl bg-teal-500/20 text-teal-400 flex items-center justify-center shrink-0 mt-0.5">
+              <div className="w-11 h-11 rounded-2xl bg-teal-500/20 text-teal-400 border border-teal-400/30 flex items-center justify-center shrink-0 mt-0.5 shadow-inner">
                 <Download className="w-5 h-5" />
               </div>
               <div>
@@ -234,20 +299,28 @@ export const ModSettingsView: React.FC = () => {
                   <h4 className="text-sm font-bold text-slate-900 dark:text-white">
                     Unduh Status / Story Kontak Otomatis
                   </h4>
-                  <span className="px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-400 text-[10px] font-bold">
-                    Story Saver
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                      modConfig.autoSaveStatus
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'bg-slate-500/20 text-slate-400'
+                    }`}
+                  >
+                    {modConfig.autoSaveStatus ? 'ON' : 'OFF'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  Tangkap & simpan foto/video dari Status WhatsApp kontak secara otomatis tanpa ketahuan pemilik status, lengkap dengan tombol unduh.
+                  Simpan foto & video dari Status WhatsApp kontak secara otomatis tanpa terlihat di daftar penonton mereka.
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => handleToggleMod('autoSaveStatus', !modConfig.autoSaveStatus)}
-              className={`w-12 h-7 rounded-full transition-colors p-1 shrink-0 ${
-                modConfig.autoSaveStatus ? 'bg-emerald-500' : 'bg-slate-600/40'
+              className={`w-12 h-7 rounded-full transition-colors p-1 shrink-0 ios-liquid-btn ${
+                modConfig.autoSaveStatus
+                  ? 'bg-emerald-500 shadow-lg shadow-emerald-500/30'
+                  : 'bg-slate-600/40'
               }`}
               aria-label="Toggle Unduh Status Otomatis"
             >
@@ -260,25 +333,38 @@ export const ModSettingsView: React.FC = () => {
           </div>
 
           {/* Anti Revoke / Delete Message */}
-          <div className="p-4 rounded-3xl ios-glass-card border border-white/20 flex items-start justify-between gap-4">
+          <div className="p-4 rounded-3xl ios-glass-card flex items-start justify-between gap-4">
             <div className="flex items-start gap-3.5">
-              <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 mt-0.5">
+              <div className="w-11 h-11 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-400/30 flex items-center justify-center shrink-0 mt-0.5 shadow-inner">
                 <Trash2 className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Anti Hapus / Tarik Pesan (Anti-Revoke)
-                </h4>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Anti Hapus / Tarik Pesan (Anti-Revoke)
+                  </h4>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                      modConfig.antiRevokeMessage
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'bg-slate-500/20 text-slate-400'
+                    }`}
+                  >
+                    {modConfig.antiRevokeMessage ? 'ON' : 'OFF'}
+                  </span>
+                </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  Pesan yang ditarik atau dihapus oleh pengirim ("Pesan ini telah dihapus") tetap tampil utuh di layar Anda dengan penanda khusus.
+                  Pesan yang ditarik oleh pengirim tetap tampil utuh di layar Anda dan tidak ikut terhapus.
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => handleToggleMod('antiRevokeMessage', !modConfig.antiRevokeMessage)}
-              className={`w-12 h-7 rounded-full transition-colors p-1 shrink-0 ${
-                modConfig.antiRevokeMessage ? 'bg-emerald-500' : 'bg-slate-600/40'
+              className={`w-12 h-7 rounded-full transition-colors p-1 shrink-0 ios-liquid-btn ${
+                modConfig.antiRevokeMessage
+                  ? 'bg-emerald-500 shadow-lg shadow-emerald-500/30'
+                  : 'bg-slate-600/40'
               }`}
               aria-label="Toggle Anti Hapus Pesan"
             >
@@ -291,25 +377,38 @@ export const ModSettingsView: React.FC = () => {
           </div>
 
           {/* Ghost Online Mode */}
-          <div className="p-4 rounded-3xl ios-glass-card border border-white/20 flex items-start justify-between gap-4">
+          <div className="p-4 rounded-3xl ios-glass-card flex items-start justify-between gap-4">
             <div className="flex items-start gap-3.5">
-              <div className="w-10 h-10 rounded-2xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 mt-0.5">
+              <div className="w-11 h-11 rounded-2xl bg-purple-500/20 text-purple-400 border border-purple-400/30 flex items-center justify-center shrink-0 mt-0.5 shadow-inner">
                 <Ghost className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Ghost Mode (Sembunyikan Status Online)
-                </h4>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Ghost Mode (Sembunyikan Status Online)
+                  </h4>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                      modConfig.hideOnlineStatus
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'bg-slate-500/20 text-slate-400'
+                    }`}
+                  >
+                    {modConfig.hideOnlineStatus ? 'ON' : 'OFF'}
+                  </span>
+                </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  Bekukan status kehadiran sehingga akun Anda tidak terlihat "Online" saat membuka aplikasi ini.
+                  Bekukan status kehadiran sehingga akun Anda tidak terlihat "Online" atau "Sedang mengetik".
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => handleToggleMod('hideOnlineStatus', !modConfig.hideOnlineStatus)}
-              className={`w-12 h-7 rounded-full transition-colors p-1 shrink-0 ${
-                modConfig.hideOnlineStatus ? 'bg-emerald-500' : 'bg-slate-600/40'
+              className={`w-12 h-7 rounded-full transition-colors p-1 shrink-0 ios-liquid-btn ${
+                modConfig.hideOnlineStatus
+                  ? 'bg-emerald-500 shadow-lg shadow-emerald-500/30'
+                  : 'bg-slate-600/40'
               }`}
               aria-label="Toggle Ghost Mode"
             >
@@ -325,15 +424,30 @@ export const ModSettingsView: React.FC = () => {
 
       {/* Section 2: Anti-Ban & Anti-Limit Engine */}
       <div className="space-y-3 pt-2">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-500 flex items-center gap-1.5">
-          <ShieldCheck className="w-3.5 h-3.5" />
-          <span>2. Mesin Anti-Ban, Anti-Spam & Anti-Limit Nomor Baru</span>
-        </h3>
+        <div className="flex items-center justify-between px-1">
+          <h3 className="text-xs font-extrabold uppercase tracking-wider text-emerald-500 flex items-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>2. Mesin Proteksi Anti-Ban, Anti-Spam & Anti-Limit</span>
+          </h3>
 
-        <div className="p-5 rounded-3xl ios-glass-card border border-white/20 space-y-5">
+          <button
+            type="button"
+            onClick={() => handleToggleAntiBan('enabled', !modConfig.antiBanGuard.enabled)}
+            className={`px-3 py-1 rounded-full text-xs font-extrabold flex items-center gap-1.5 ios-liquid-btn ${
+              modConfig.antiBanGuard.enabled
+                ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/25'
+                : 'ios-glass-subtle text-slate-400'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Master Anti-Ban: {modConfig.antiBanGuard.enabled ? 'ON' : 'OFF'}</span>
+          </button>
+        </div>
+
+        <div className="p-5 rounded-3xl ios-glass-card space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Human Typing Simulation */}
-            <div className="p-3.5 rounded-2xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 flex items-center justify-between gap-3">
+            <div className="p-3.5 rounded-2xl ios-glass-subtle flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <Activity className="w-4 h-4 text-emerald-400 shrink-0" />
                 <div>
@@ -353,7 +467,7 @@ export const ModSettingsView: React.FC = () => {
                     !modConfig.antiBanGuard.humanTypingSimulation
                   )
                 }
-                className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 ${
+                className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 ios-liquid-btn ${
                   modConfig.antiBanGuard.humanTypingSimulation ? 'bg-emerald-500' : 'bg-slate-600/40'
                 }`}
               >
@@ -366,7 +480,7 @@ export const ModSettingsView: React.FC = () => {
             </div>
 
             {/* Adaptive Jitter Delay */}
-            <div className="p-3.5 rounded-2xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 flex items-center justify-between gap-3">
+            <div className="p-3.5 rounded-2xl ios-glass-subtle flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <Sliders className="w-4 h-4 text-teal-400 shrink-0" />
                 <div>
@@ -386,7 +500,7 @@ export const ModSettingsView: React.FC = () => {
                     !modConfig.antiBanGuard.adaptiveJitterDelay
                   )
                 }
-                className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 ${
+                className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 ios-liquid-btn ${
                   modConfig.antiBanGuard.adaptiveJitterDelay ? 'bg-emerald-500' : 'bg-slate-600/40'
                 }`}
               >
@@ -399,7 +513,7 @@ export const ModSettingsView: React.FC = () => {
             </div>
 
             {/* Invisible Zero-Width Hash */}
-            <div className="p-3.5 rounded-2xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 flex items-center justify-between gap-3">
+            <div className="p-3.5 rounded-2xl ios-glass-subtle flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <Zap className="w-4 h-4 text-amber-400 shrink-0" />
                 <div>
@@ -419,7 +533,7 @@ export const ModSettingsView: React.FC = () => {
                     !modConfig.antiBanGuard.invisibleZeroWidthVariation
                   )
                 }
-                className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 ${
+                className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 ios-liquid-btn ${
                   modConfig.antiBanGuard.invisibleZeroWidthVariation
                     ? 'bg-emerald-500'
                     : 'bg-slate-600/40'
@@ -436,7 +550,7 @@ export const ModSettingsView: React.FC = () => {
             </div>
 
             {/* Auto Warmup New Contacts */}
-            <div className="p-3.5 rounded-2xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 flex items-center justify-between gap-3">
+            <div className="p-3.5 rounded-2xl ios-glass-subtle flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <UserPlus className="w-4 h-4 text-sky-400 shrink-0" />
                 <div>
@@ -456,7 +570,7 @@ export const ModSettingsView: React.FC = () => {
                     !modConfig.antiBanGuard.autoWarmupNewContacts
                   )
                 }
-                className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 ${
+                className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 ios-liquid-btn ${
                   modConfig.antiBanGuard.autoWarmupNewContacts ? 'bg-emerald-500' : 'bg-slate-600/40'
                 }`}
               >
@@ -470,7 +584,7 @@ export const ModSettingsView: React.FC = () => {
           </div>
 
           {/* Delay Range Sliders */}
-          <div className="pt-2 border-t border-black/5 dark:border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="pt-3 border-t border-black/5 dark:border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <div className="flex justify-between text-xs font-semibold mb-1">
                 <span>Jeda Minimum Antar Pesan (Min Jitter)</span>

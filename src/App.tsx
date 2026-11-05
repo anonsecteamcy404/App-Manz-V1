@@ -36,12 +36,12 @@ const MainApp: React.FC = () => {
   };
 
   return (
-    <div className="relative h-screen w-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-emerald-500/30 selection:text-emerald-200">
-      {/* Dynamic iOS Ambient Glass Background Gradients */}
+    <div className="relative h-screen w-full flex flex-col bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans selection:bg-emerald-500/30 selection:text-emerald-200 transition-colors duration-500">
+      {/* Dynamic iOS 26 Liquid Glass Ambient Background Orbs */}
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-        <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-emerald-600/15 dark:bg-emerald-500/15 rounded-full blur-[120px] animate-pulse" />
-        <div className="absolute top-1/2 -right-40 w-[500px] h-[500px] bg-teal-500/10 dark:bg-teal-400/10 rounded-full blur-[140px]" />
-        <div className="absolute -bottom-40 left-1/3 w-[650px] h-[650px] bg-indigo-600/15 dark:bg-indigo-500/15 rounded-full blur-[150px]" />
+        <div className="absolute -top-36 -left-36 w-[580px] h-[580px] bg-emerald-500/20 dark:bg-emerald-500/18 rounded-full blur-[130px] animate-liquid-orb" />
+        <div className="absolute top-1/3 -right-36 w-[520px] h-[520px] bg-teal-400/18 dark:bg-teal-400/14 rounded-full blur-[140px] animate-liquid-orb-slow" />
+        <div className="absolute -bottom-40 left-1/3 w-[640px] h-[640px] bg-indigo-500/16 dark:bg-indigo-500/15 rounded-full blur-[150px] animate-liquid-orb" />
       </div>
 
       {/* Main Top Bar */}
@@ -54,8 +54,8 @@ const MainApp: React.FC = () => {
       />
 
       {/* Main View Area */}
-      <main className="relative z-10 flex-1 flex w-full max-w-[1600px] mx-auto p-2 sm:p-3 md:p-4 overflow-hidden min-h-0">
-        <div className="w-full flex-1 flex rounded-3xl ios-glass-card border border-white/20 shadow-2xl overflow-hidden min-h-0">
+      <main className="relative z-10 flex-1 flex w-full max-w-[1640px] mx-auto p-2 sm:p-3 md:p-4 overflow-hidden min-h-0">
+        <div className="w-full flex-1 flex rounded-[28px] ios-glass-card overflow-hidden min-h-0">
           {currentTab === 'chats' && (
             <div className="w-full h-full flex overflow-hidden">
               {/* Chat list (hidden on small screens if active chat is open) */}

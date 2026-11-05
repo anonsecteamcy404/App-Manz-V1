@@ -79,27 +79,27 @@ export const LinkingScreen: React.FC = () => {
 
   return (
     <div className="relative min-h-screen w-full flex flex-col items-center justify-center p-4 md:p-8 overflow-hidden bg-gradient-to-br from-slate-900 via-slate-950 to-emerald-950 text-slate-100">
-      {/* Dynamic Ambient Glass Blobs */}
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none animate-pulse" />
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-teal-500/15 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute top-1/3 right-1/3 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+      {/* Dynamic iOS 26 Liquid Glass Ambient Orbs */}
+      <div className="absolute top-1/4 left-1/4 w-[420px] h-[420px] bg-emerald-500/22 rounded-full blur-[110px] pointer-events-none animate-liquid-orb" />
+      <div className="absolute bottom-1/4 right-1/4 w-[420px] h-[420px] bg-teal-400/18 rounded-full blur-[120px] pointer-events-none animate-liquid-orb-slow" />
+      <div className="absolute top-1/3 right-1/3 w-[340px] h-[340px] bg-indigo-500/16 rounded-full blur-[110px] pointer-events-none animate-liquid-orb" />
 
-      {/* Top mini glass bar */}
+      {/* Top mini liquid glass bar */}
       <header className="absolute top-6 left-6 right-6 flex items-center justify-between z-10 max-w-5xl mx-auto">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center backdrop-blur-md shadow-lg shadow-emerald-500/10">
+          <div className="w-11 h-11 rounded-2xl ios-glass-card flex items-center justify-center shadow-lg shadow-emerald-500/15">
             <Smartphone className="w-5 h-5 text-emerald-400" />
           </div>
           <div>
-            <h1 className="text-sm font-bold tracking-tight text-white flex items-center gap-2">
-              WhatsApp iGlass Mod Pro
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
+            <h1 className="text-sm font-extrabold tracking-tight text-white flex items-center gap-2">
+              WhatsApp iGlass Liquid Pro
+              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
                 <Radio className="w-2.5 h-2.5 text-emerald-400 animate-pulse" />
                 100% Real Multi-Device Engine
               </span>
             </h1>
             <p className="text-xs text-slate-400">
-              Anti-Centang Biru · Buka 1x Lihat · Chat Boom · Proteksi Anti-Ban & Anti-Limit
+              Profil Asli Otomatis · Floating Chat Boom · Anti-Centang Biru · Buka 1x Lihat
             </p>
           </div>
         </div>
@@ -108,14 +108,14 @@ export const LinkingScreen: React.FC = () => {
           <a
             href="/api/source-zip"
             download="iGlass-WA-Companion-SourceCode.zip"
-            className="px-3.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/30 text-xs font-semibold text-emerald-300 backdrop-blur-md transition-all flex items-center gap-1.5 shadow-sm"
+            className="px-3.5 py-2 rounded-2xl ios-liquid-capsule text-xs font-bold text-emerald-300 flex items-center gap-1.5 ios-liquid-btn"
           >
             <span>📦 Unduh Source Code (.zip)</span>
           </a>
           <button
             type="button"
             onClick={() => setDarkMode(!darkMode)}
-            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-xs font-medium text-slate-200 backdrop-blur-md transition-all"
+            className="px-3.5 py-2 rounded-2xl ios-glass-subtle text-xs font-bold text-slate-200 ios-liquid-btn"
             aria-label="Ubah Tema"
           >
             {darkMode ? '🌙 Gelap' : '☀️ Terang'}
@@ -123,8 +123,8 @@ export const LinkingScreen: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Glass Card Container */}
-      <main className="relative z-10 w-full max-w-4xl rounded-3xl ios-glass-card shadow-2xl p-6 md:p-10 my-16 border border-white/20">
+      {/* Main Liquid Glass Card Container */}
+      <main className="relative z-10 w-full max-w-4xl rounded-[32px] ios-glass-card p-6 md:p-10 my-16 animate-spring-pop">
         {connectionState === 'syncing' ? (
           /* Handshake & Syncing State */
           <div className="py-12 flex flex-col items-center text-center max-w-md mx-auto">
@@ -157,49 +157,49 @@ export const LinkingScreen: React.FC = () => {
             {/* Left Column: Instructions & Tab switch */}
             <div className="md:col-span-7 space-y-5">
               {/* Feature Highlights Banner */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 flex flex-col gap-1">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-3 rounded-2xl ios-glass-subtle flex flex-col gap-1">
+                  <Zap className="w-4 h-4 text-amber-400" />
+                  <span className="text-[11px] font-bold text-white">Floating Boom</span>
+                  <span className="text-[10px] text-slate-300">Melayang di tiap chat</span>
+                </div>
+                <div className="p-3 rounded-2xl ios-glass-subtle flex flex-col gap-1">
                   <EyeOff className="w-4 h-4 text-emerald-400" />
                   <span className="text-[11px] font-bold text-white">Anti Centang Biru</span>
-                  <span className="text-[10px] text-slate-400">Buka & balas tetap abu-abu</span>
+                  <span className="text-[10px] text-slate-300">Buka & balas tetap abu</span>
                 </div>
-                <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 flex flex-col gap-1">
+                <div className="p-3 rounded-2xl ios-glass-subtle flex flex-col gap-1">
                   <Lock className="w-4 h-4 text-teal-400" />
                   <span className="text-[11px] font-bold text-white">Buka 1x Lihat</span>
-                  <span className="text-[10px] text-slate-400">Simpan foto/video 1x lihat</span>
+                  <span className="text-[10px] text-slate-300">Simpan foto/video 1x</span>
                 </div>
-                <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 flex flex-col gap-1">
-                  <Zap className="w-4 h-4 text-amber-400" />
-                  <span className="text-[11px] font-bold text-white">Chat Boom</span>
-                  <span className="text-[10px] text-slate-400">Kirim pesan berulang otomatis</span>
-                </div>
-                <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 flex flex-col gap-1">
+                <div className="p-3 rounded-2xl ios-glass-subtle flex flex-col gap-1">
                   <Download className="w-4 h-4 text-sky-400" />
-                  <span className="text-[11px] font-bold text-white">Unduh Status</span>
-                  <span className="text-[10px] text-slate-400">Simpan story & anti-ban</span>
+                  <span className="text-[11px] font-bold text-white">Profil & Status</span>
+                  <span className="text-[10px] text-slate-300">Foto profil WA asli</span>
                 </div>
               </div>
 
               <div>
-                <span className="text-xs uppercase tracking-wider font-semibold text-emerald-400">
-                  Koneksi Langsung WhatsApp Multi-Device (Tanpa Simulasi/Demo)
+                <span className="text-xs uppercase tracking-wider font-extrabold text-emerald-400">
+                  Koneksi Langsung WhatsApp Multi-Device (Semua Mod Awal OFF — Bebas Atur)
                 </span>
                 <h2 className="text-2xl md:text-3xl font-extrabold text-white mt-1 tracking-tight">
                   Tautkan WhatsApp Asli Anda
                 </h2>
                 <p className="text-xs md:text-sm text-slate-300 mt-2 leading-relaxed">
-                  Pindai kode QR asli di sebelah kanan menggunakan kamera WhatsApp di HP Anda, atau tautkan menggunakan kode angka 8 digit. Semua obrolan, status, dan media disinkronkan secara real-time.
+                  Pindai kode QR asli di sebelah kanan menggunakan kamera WhatsApp di HP Anda, atau tautkan menggunakan kode angka 8 digit. Foto profil asli, obrolan, status, dan media langsung disinkronkan secara real-time.
                 </p>
               </div>
 
               {/* Segmented Control for Method */}
-              <div className="inline-flex p-1 rounded-2xl bg-white/10 backdrop-blur-md border border-white/10">
+              <div className="inline-flex p-1 rounded-2xl ios-glass-subtle">
                 <button
                   type="button"
                   onClick={() => setActiveTab('qr')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold ios-liquid-btn ${
                     activeTab === 'qr'
-                      ? 'bg-emerald-500 text-white shadow-md'
+                      ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-md'
                       : 'text-slate-300 hover:text-white'
                   }`}
                 >
@@ -209,9 +209,9 @@ export const LinkingScreen: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setActiveTab('code')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold ios-liquid-btn ${
                     activeTab === 'code'
-                      ? 'bg-emerald-500 text-white shadow-md'
+                      ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-md'
                       : 'text-slate-300 hover:text-white'
                   }`}
                 >
@@ -261,30 +261,30 @@ export const LinkingScreen: React.FC = () => {
                 <div className="space-y-3">
                   <div className="space-y-1">
                     <label className="text-xs text-slate-300 font-medium">
-                      Masukkan Nomor WhatsApp Aktif (Gunakan kode negara, misal: 62812xxxx)
+                      Masukkan Nomor WhatsApp Aktif (Contoh: 0812xxxx atau 62812xxxx)
                     </label>
                     <div className="flex gap-2">
                       <input
                         type="text"
                         value={phoneNumberInput}
                         onChange={(e) => setPhoneNumberInput(e.target.value)}
-                        placeholder="6281234567890"
-                        className="flex-1 px-4 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400 text-xs font-mono"
+                        placeholder="081234567890"
+                        className="flex-1 px-4 py-2.5 rounded-2xl ios-glass-subtle text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400 text-xs font-mono"
                       />
                       <button
                         type="button"
                         onClick={handleRequestPairingCode}
                         disabled={isLoadingRealQr}
-                        className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold transition-all shrink-0"
+                        className="px-4 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold ios-liquid-btn shrink-0"
                       >
                         Minta Kode
                       </button>
                     </div>
                   </div>
                   {pairingCode ? (
-                    <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-black/40 border border-emerald-500/30">
+                    <div className="flex items-center gap-3 p-3.5 rounded-2xl ios-liquid-capsule animate-spring-pop">
                       <div>
-                        <span className="text-[10px] uppercase tracking-wider text-slate-400 block">
+                        <span className="text-[10px] uppercase tracking-wider text-slate-300 block">
                           Kode Tautan WhatsApp Anda:
                         </span>
                         <span className="text-lg md:text-2xl font-mono font-extrabold tracking-widest text-emerald-300">
@@ -294,7 +294,7 @@ export const LinkingScreen: React.FC = () => {
                       <button
                         type="button"
                         onClick={handleCopyCode}
-                        className="ml-auto px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-medium text-slate-200 transition-all flex items-center gap-1.5"
+                        className="ml-auto px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-xs font-bold text-white flex items-center gap-1.5 ios-liquid-btn"
                       >
                         {isCopied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : null}
                         {isCopied ? 'Tersalin' : 'Salin Kode'}
@@ -319,7 +319,7 @@ export const LinkingScreen: React.FC = () => {
                       handleRefreshQr();
                     }
                   }}
-                  className="flex-1 px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-semibold text-xs shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                  className="flex-1 px-5 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-extrabold text-xs shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 ios-liquid-btn"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRealQr ? 'animate-spin' : ''}`} />
                   <span>
@@ -335,7 +335,7 @@ export const LinkingScreen: React.FC = () => {
 
             {/* Right Column: Visual QR Code */}
             <div className="md:col-span-5 flex flex-col items-center justify-center">
-              <div className="relative p-6 rounded-3xl bg-white/95 dark:bg-slate-900/90 shadow-2xl border border-white/30 backdrop-blur-xl flex flex-col items-center text-center">
+              <div className="relative p-6 rounded-[28px] ios-glass-card flex flex-col items-center text-center">
                 {/* QR Code Canvas */}
                 <div className="relative w-60 h-60 rounded-2xl p-2 bg-white flex items-center justify-center overflow-hidden border border-slate-200 shadow-inner">
                   {realQrCodeDataUrl ? (
@@ -359,15 +359,15 @@ export const LinkingScreen: React.FC = () => {
                 </div>
 
                 {/* QR Timer & Refresh Info */}
-                <div className="mt-4 flex items-center justify-between w-full text-xs text-slate-500 dark:text-slate-400">
+                <div className="mt-4 flex items-center justify-between w-full text-xs text-slate-300">
                   <span className="flex items-center gap-1.5 font-medium">
-                    <RefreshCw className="w-3.5 h-3.5 text-emerald-500" />
+                    <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
                     Otomatis segarkan ({qrTimer}d)
                   </span>
                   <button
                     type="button"
                     onClick={handleRefreshQr}
-                    className="text-emerald-500 hover:text-emerald-400 font-semibold text-xs"
+                    className="text-emerald-400 hover:text-emerald-300 font-bold text-xs ios-liquid-btn"
                   >
                     Muat Ulang QR
                   </button>
@@ -375,7 +375,7 @@ export const LinkingScreen: React.FC = () => {
               </div>
 
               {/* Server Status Badge */}
-              <div className="mt-4 px-4 py-2 rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 text-xs text-slate-300 flex items-center gap-2">
+              <div className="mt-4 px-4 py-2 rounded-full ios-liquid-capsule text-xs text-slate-200 flex items-center gap-2">
                 <span
                   className={`w-2 h-2 rounded-full ${
                     realBackendStatus === 'connected'
@@ -385,7 +385,7 @@ export const LinkingScreen: React.FC = () => {
                       : 'bg-emerald-400'
                   }`}
                 />
-                <span>
+                <span className="font-semibold">
                   {realBackendStatus === 'connected'
                     ? 'WhatsApp Asli Terhubung!'
                     : realBackendStatus === 'qr_ready'
@@ -401,7 +401,7 @@ export const LinkingScreen: React.FC = () => {
       {/* Footer info */}
       <footer className="relative z-10 text-xs text-slate-400 text-center max-w-2xl">
         <p>
-          iGlass WA Companion menggunakan protokol resmi WhatsApp Multi-Device dengan mesin <strong>Stealth Privacy Mod</strong> & <strong>Anti-Ban Shield</strong>. Sesi tersimpan aman di perangkat Anda.
+          iGlass WA Companion menggunakan protokol resmi WhatsApp Multi-Device dengan desain <strong>iOS 26 Liquid Glass</strong>, sinkronisasi profil asli otomatis, dan <strong>Floating Chat Boom</strong>.
         </p>
       </footer>
     </div>

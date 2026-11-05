@@ -78,7 +78,7 @@ interface WhatsAppContextType {
   disconnectDevice: () => void;
   selectChat: (chatId: string) => void;
   startNewChatByPhone: (phone: string, initialName?: string) => string;
-  sendMessage: (chatId: string, text: string, attachments?: MediaAttachment[]) => Promise<void>;
+  sendMessage: (chatId: string, text: string, attachments?: MediaAttachment[], rawFile?: File) => Promise<void>;
   startChatBoom: (chatId: string, text: string, count: number) => Promise<{ success: boolean; error?: string }>;
   stopChatBoom: () => Promise<void>;
   updateModConfig: (updates: Partial<ModConfig>) => Promise<void>;
@@ -100,12 +100,12 @@ interface WhatsAppContextType {
 
 const WhatsAppContext = createContext<WhatsAppContextType | null>(null);
 
-const STORAGE_KEY_CONFIG = 'iglass_wa_autoexport_config';
-const STORAGE_KEY_RECORDS = 'iglass_wa_export_records';
-const STORAGE_KEY_MOD = 'iglass_wa_mod_config';
+const STORAGE_KEY_CONFIG = 'iglass_wa_autoexport_config_v3';
+const STORAGE_KEY_RECORDS = 'iglass_wa_export_records_v3';
+const STORAGE_KEY_MOD = 'iglass_wa_mod_config_v3_all_off';
 
 const DEFAULT_CONFIG: AutoExportConfig = {
-  enabled: true,
+  enabled: false,
   frequency: 'daily',
   includeMedia: true,
   includeVoiceNotes: true,
@@ -116,23 +116,33 @@ const DEFAULT_CONFIG: AutoExportConfig = {
   autoDownloadZip: true,
 };
 
+// Initially ALL OFF (false) so the user turns on each Mod / Anti-Ban feature manually!
 const DEFAULT_MOD_CONFIG: ModConfig = {
-  antiBlueTick: true,
-  antiBlueTickOnReply: true,
-  antiViewOnce: true,
-  autoSaveStatus: true,
-  antiRevokeMessage: true,
+  antiBlueTick: false,
+  antiBlueTickOnReply: false,
+  antiViewOnce: false,
+  autoSaveStatus: false,
+  antiRevokeMessage: false,
   hideOnlineStatus: false,
   antiBanGuard: {
-    enabled: true,
-    humanTypingSimulation: true,
-    adaptiveJitterDelay: true,
-    invisibleZeroWidthVariation: true,
-    autoWarmupNewContacts: true,
+    enabled: false,
+    humanTypingSimulation: false,
+    adaptiveJitterDelay: false,
+    invisibleZeroWidthVariation: false,
+    autoWarmupNewContacts: false,
     minDelayMs: 1400,
     maxDelayMs: 3200,
   },
 };
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
@@ -162,7 +172,7 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [darkMode]);
 
-  // Real Data States (No fake demo chats)
+  // Real Data States
   const [chats, setChats] = useState<Chat[]>(INITIAL_CHATS);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [contacts, setContacts] = useState<Contact[]>(INITIAL_CONTACTS);
@@ -170,7 +180,7 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [calls, setCalls] = useState<CallRecord[]>(INITIAL_CALLS);
   const [linkedSessions, setLinkedSessions] = useState<LinkedDeviceSession[]>(INITIAL_LINKED_SESSIONS);
 
-  // Mod & Boom states
+  // Mod & Boom states (Starts all OFF unless user explicitly toggled in v3)
   const [modConfig, setModConfig] = useState<ModConfig>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_MOD);
@@ -183,6 +193,7 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [boomStatus, setBoomStatus] = useState<BoomJobStatus>({
     isRunning: false,
     chatId: '',
+    text: '',
     total: 0,
     sent: 0,
     currentDelayMs: 0,
@@ -237,7 +248,7 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(toSave));
   }, [exportRecords]);
 
-  // Sync initial modConfig to server on mount
+  // Sync modConfig to server on mount
   useEffect(() => {
     fetch('/api/whatsapp/mod-config', {
       method: 'POST',
@@ -291,11 +302,9 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             const chatData = await chatRes.json();
             if (Array.isArray(chatData.chats)) {
               setChats((prev) => {
-                // Merge server chats with any locally initiated unsent chat tabs
                 const serverIds = new Set(chatData.chats.map((c: Chat) => c.id));
                 const localOnly = prev.filter((p) => !serverIds.has(p.id));
-                const merged = [...chatData.chats, ...localOnly];
-                return merged;
+                return [...chatData.chats, ...localOnly];
               });
               setActiveChatId((curr) => curr || chatData.chats[0]?.id || null);
             }
@@ -316,7 +325,7 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
 
     pollBackend();
-    const interval = setInterval(pollBackend, 1800);
+    const interval = setInterval(pollBackend, 1500);
     return () => {
       isMounted = false;
       clearInterval(interval);
@@ -358,7 +367,6 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setChats((prev) =>
       prev.map((c) => (c.id === chatId ? { ...c, unreadCount: 0 } : c))
     );
-    // Notify server we opened the chat (server respects antiBlueTick!)
     fetch('/api/whatsapp/read', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -366,7 +374,6 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }).catch(() => {});
   };
 
-  // Start a new chat with any phone number (even unsaved numbers!)
   const startNewChatByPhone = (rawPhone: string, initialName?: string): string => {
     const cleaned = rawPhone.replace(/[^0-9]/g, '');
     const normalized = cleaned.startsWith('0') ? `62${cleaned.slice(1)}` : cleaned;
@@ -379,7 +386,7 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         id: jid,
         name: displayName,
         isGroup: false,
-        avatar: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="%2310b981"/><text x="50" y="58" font-size="30" font-weight="bold" fill="white" font-family="sans-serif" text-anchor="middle">WA</text></svg>`,
+        avatar: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><circle cx="60" cy="60" r="60" fill="%2310b981"/><text x="60" y="70" font-size="36" font-weight="bold" fill="white" font-family="sans-serif" text-anchor="middle">WA</text></svg>`,
         unreadCount: 0,
         isPinned: true,
         isArchived: false,
@@ -391,7 +398,7 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           senderId: 'me',
           senderName: 'Anda',
           isOutgoing: true,
-          text: 'Obrolan baru siap dikirim (Anti-Ban Warmup Aktif)',
+          text: 'Ketuk untuk mulai percakapan',
           timestamp: 'Baru',
           fullTimestamp: '',
           status: 'read',
@@ -584,7 +591,12 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => clearInterval(interval);
   }, [connectionState, chats.length]);
 
-  const sendMessage = async (chatId: string, text: string, attachments?: MediaAttachment[]) => {
+  const sendMessage = async (
+    chatId: string,
+    text: string,
+    attachments?: MediaAttachment[],
+    rawFile?: File
+  ) => {
     const now = new Date();
     const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
     const fullTimeStr = `${now.toLocaleDateString('id-ID')}, ${now.toLocaleTimeString('id-ID')}`;
@@ -614,10 +626,35 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
 
     try {
+      let mediaBase64: string | undefined;
+      let mediaType: string | undefined;
+      let mimeType: string | undefined;
+      let fileName: string | undefined;
+
+      if (rawFile) {
+        mediaBase64 = await fileToBase64(rawFile);
+        mediaType = rawFile.type.startsWith('image/')
+          ? 'image'
+          : rawFile.type.startsWith('video/')
+          ? 'video'
+          : rawFile.type.startsWith('audio/')
+          ? 'audio'
+          : 'document';
+        mimeType = rawFile.type || 'application/octet-stream';
+        fileName = rawFile.name;
+      }
+
       await fetch('/api/whatsapp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId, text }),
+        body: JSON.stringify({
+          chatId,
+          text,
+          mediaBase64,
+          mediaType,
+          mimeType,
+          fileName,
+        }),
       });
     } catch (err) {
       console.error('Failed to send via real WhatsApp backend:', err);

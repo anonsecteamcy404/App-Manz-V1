@@ -57,7 +57,9 @@ interface WAState {
   errorMessage: string | null;
   chats: Map<string, any>;
   messages: Map<string, any[]>;
+  rawMediaMessages: Map<string, { innerMedia: any; mediaType: 'image' | 'video' | 'audio' | 'document'; fileName: string; mimeType: string }>;
   contacts: Map<string, any>;
+  profilePics: Map<string, string>;
   stories: Map<string, any>;
   calls: any[];
   lastConnectedTimestamp: number | null;
@@ -66,6 +68,7 @@ interface WAState {
   knownInteractedJids: Set<string>;
 }
 
+// Default: ALL Mod features start OFF (false) so the user turns them on manually
 const waState: WAState = {
   status: 'disconnected',
   qrCodeDataUrl: null,
@@ -75,24 +78,26 @@ const waState: WAState = {
   errorMessage: null,
   chats: new Map(),
   messages: new Map(),
+  rawMediaMessages: new Map(),
   contacts: new Map(),
+  profilePics: new Map(),
   stories: new Map(),
   calls: [],
   lastConnectedTimestamp: null,
   knownInteractedJids: new Set(),
   modConfig: {
-    antiBlueTick: true,
-    antiBlueTickOnReply: true,
-    antiViewOnce: true,
-    autoSaveStatus: true,
-    antiRevokeMessage: true,
+    antiBlueTick: false,
+    antiBlueTickOnReply: false,
+    antiViewOnce: false,
+    autoSaveStatus: false,
+    antiRevokeMessage: false,
     hideOnlineStatus: false,
     antiBanGuard: {
-      enabled: true,
-      humanTypingSimulation: true,
-      adaptiveJitterDelay: true,
-      invisibleZeroWidthVariation: true,
-      autoWarmupNewContacts: true,
+      enabled: false,
+      humanTypingSimulation: false,
+      adaptiveJitterDelay: false,
+      invisibleZeroWidthVariation: false,
+      autoWarmupNewContacts: false,
       minDelayMs: 1400,
       maxDelayMs: 3200,
     },
@@ -100,6 +105,7 @@ const waState: WAState = {
   boomStatus: {
     isRunning: false,
     chatId: '',
+    text: '',
     total: 0,
     sent: 0,
     currentDelayMs: 0,
@@ -109,19 +115,89 @@ const waState: WAState = {
 };
 
 let waSocket: WASocket | null = null;
+let baileysModule: any = null;
 let isStarting = false;
+const pendingAvatarFetches = new Set<string>();
 
-function generateAvatarSvg(name: string, bg = '#10b981'): string {
-  const initials = (name || 'WA')
-    .replace(/[^a-zA-Z0-9 ]/g, '')
-    .trim()
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase() || 'WA';
+function normalizeJid(jid: string | undefined | null): string {
+  if (!jid) return '';
+  if (jid === 'status@broadcast') return jid;
+  // Strip device suffix like 628123456:12@s.whatsapp.net -> 628123456@s.whatsapp.net
+  if (jid.includes(':') && jid.includes('@')) {
+    const [userPart, domainPart] = jid.split('@');
+    return `${userPart.split(':')[0]}@${domainPart}`;
+  }
+  return jid;
+}
+
+function generateAvatarSvg(name: string, bg = '#059669'): string {
+  const clean = (name || 'WA').replace(/[^a-zA-Z0-9 ]/g, '').trim();
+  const initials =
+    clean
+      .split(' ')
+      .filter(Boolean)
+      .map((n) => n[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase() || 'WA';
   const encodedBg = encodeURIComponent(bg);
-  return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="${encodedBg}"/><text x="50" y="58" font-size="32" font-weight="bold" fill="white" font-family="sans-serif" text-anchor="middle">${initials}</text></svg>`;
+  return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${encodedBg}"/><stop offset="100%" stop-color="%230f172a"/></linearGradient></defs><circle cx="60" cy="60" r="60" fill="url(%23g)"/><text x="60" y="70" font-size="38" font-weight="bold" fill="white" font-family="sans-serif" text-anchor="middle">${initials}</text></svg>`;
+}
+
+function getAvatarForJid(jid: string, displayName: string): string {
+  const norm = normalizeJid(jid);
+  const cached = waState.profilePics.get(norm);
+  if (cached) return cached;
+  // Trigger background fetch of real WhatsApp profile picture if connected
+  queueProfilePicFetch(norm);
+  const colors = ['#10b981', '#0ea5e9', '#6366f1', '#ec4899', '#f59e0b', '#14b8a6'];
+  let hash = 0;
+  for (let i = 0; i < norm.length; i++) hash = norm.charCodeAt(i) + ((hash << 5) - hash);
+  const color = colors[Math.abs(hash) % colors.length];
+  return generateAvatarSvg(displayName, color);
+}
+
+async function queueProfilePicFetch(jid: string) {
+  const norm = normalizeJid(jid);
+  if (!norm || norm === 'status@broadcast' || norm.endsWith('@broadcast')) return;
+  if (waState.profilePics.has(norm) || pendingAvatarFetches.has(norm)) return;
+  if (!waSocket || waState.status !== 'connected') return;
+
+  pendingAvatarFetches.add(norm);
+  try {
+    const url = await waSocket.profilePictureUrl(norm, 'preview').catch(() =>
+      waSocket?.profilePictureUrl(norm, 'image')
+    );
+    if (url) {
+      waState.profilePics.set(norm, url);
+      // Update chat avatar if exists
+      const chat = waState.chats.get(norm);
+      if (chat) {
+        chat.avatar = url;
+        waState.chats.set(norm, chat);
+      }
+      // Update contact avatar if exists
+      const contact = waState.contacts.get(norm);
+      if (contact) {
+        contact.avatar = url;
+        waState.contacts.set(norm, contact);
+      }
+      // Update story avatar if exists
+      const story = waState.stories.get(norm);
+      if (story) {
+        story.contactAvatar = url;
+        waState.stories.set(norm, story);
+      }
+      // Update self user avatar if matches
+      if (waState.user && normalizeJid(waState.user.id) === norm) {
+        waState.user.avatar = url;
+      }
+    }
+  } catch {
+    // Contact has no profile photo or privacy hidden
+  } finally {
+    pendingAvatarFetches.delete(norm);
+  }
 }
 
 function formatBytesServer(bytes: number): string {
@@ -133,7 +209,7 @@ function formatBytesServer(bytes: number): string {
 }
 
 /**
- * Unwraps ViewOnce (1x Lihat) or Ephemeral message wrappers so we can access the inner media/text
+ * Unwraps ViewOnce (1x Lihat), Ephemeral, or Edited message wrappers so we can access the inner media/text
  */
 function unwrapMessageContent(message: any): { innerMessage: any; isViewOnce: boolean } {
   if (!message) return { innerMessage: null, isViewOnce: false };
@@ -142,16 +218,22 @@ function unwrapMessageContent(message: any): { innerMessage: any; isViewOnce: bo
     return unwrapMessageContent(message.ephemeralMessage.message);
   }
   if (message.viewOnceMessage?.message) {
-    return { innerMessage: message.viewOnceMessage.message, isViewOnce: true };
+    const res = unwrapMessageContent(message.viewOnceMessage.message);
+    return { innerMessage: res.innerMessage, isViewOnce: true };
   }
   if (message.viewOnceMessageV2?.message) {
-    return { innerMessage: message.viewOnceMessageV2.message, isViewOnce: true };
+    const res = unwrapMessageContent(message.viewOnceMessageV2.message);
+    return { innerMessage: res.innerMessage, isViewOnce: true };
   }
   if (message.viewOnceMessageV2Extension?.message) {
-    return { innerMessage: message.viewOnceMessageV2Extension.message, isViewOnce: true };
+    const res = unwrapMessageContent(message.viewOnceMessageV2Extension.message);
+    return { innerMessage: res.innerMessage, isViewOnce: true };
   }
   if (message.documentWithCaptionMessage?.message) {
     return unwrapMessageContent(message.documentWithCaptionMessage.message);
+  }
+  if (message.editedMessage?.message) {
+    return unwrapMessageContent(message.editedMessage.message);
   }
 
   const hasViewOnceFlag =
@@ -163,9 +245,36 @@ function unwrapMessageContent(message: any): { innerMessage: any; isViewOnce: bo
 }
 
 /**
- * Adds invisible zero-width non-joiner characters at varying positions so WhatsApp's
- * automated spam hash detector sees each message as cryptographically distinct while looking identical to humans.
+ * Downloads media using Baileys downloadContentFromMessage (works reliably for ViewOnce 1x Lihat, Status, and normal media)
  */
+async function downloadAndSaveMedia(
+  mediaMsg: any,
+  mediaType: 'image' | 'video' | 'audio' | 'document',
+  fileName: string
+): Promise<string> {
+  if (!mediaMsg || !baileysModule?.downloadContentFromMessage) return '';
+  const savedPath = path.join(MEDIA_CACHE_DIR, fileName);
+  if (fs.existsSync(savedPath)) {
+    return `/api/media-file/${encodeURIComponent(fileName)}`;
+  }
+
+  try {
+    const stream = await baileysModule.downloadContentFromMessage(mediaMsg, mediaType);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.from(chunk));
+    }
+    const buffer = Buffer.concat(chunks);
+    if (buffer.length > 0) {
+      fs.writeFileSync(savedPath, buffer);
+      return `/api/media-file/${encodeURIComponent(fileName)}`;
+    }
+  } catch (err) {
+    // Fallback to downloadMediaMessage if available
+  }
+  return '';
+}
+
 function applyAntiBanTextVariation(text: string, index: number): string {
   if (!waState.modConfig.antiBanGuard.enabled || !waState.modConfig.antiBanGuard.invisibleZeroWidthVariation) {
     return text;
@@ -179,9 +288,6 @@ function applyAntiBanTextVariation(text: string, index: number): string {
   return `${text}${invisibleSuffix}`;
 }
 
-/**
- * Safe Anti-Ban message sender with human presence simulation, typing duration, and new-contact warm-up
- */
 async function sendSafeAntiBanMessage(
   sock: WASocket,
   jid: string,
@@ -189,30 +295,29 @@ async function sendSafeAntiBanMessage(
   msgIndex = 0
 ): Promise<any> {
   const guard = waState.modConfig.antiBanGuard;
+  const stealthNoBlueTick = waState.modConfig.antiBlueTickOnReply || waState.modConfig.hideOnlineStatus;
 
   if (guard.enabled) {
-    // 1. Auto Warm-up for new contacts (prevents instant block when messaging unsaved numbers)
     if (guard.autoWarmupNewContacts && !waState.knownInteractedJids.has(jid)) {
       try {
         await sock.presenceSubscribe(jid);
-        await new Promise((r) => setTimeout(r, 450 + Math.floor(Math.random() * 400)));
+        await new Promise((r) => setTimeout(r, 350 + Math.floor(Math.random() * 350)));
       } catch {}
       waState.knownInteractedJids.add(jid);
     }
 
-    // 2. Human typing simulation (composing -> wait -> paused)
-    if (guard.humanTypingSimulation && !waState.modConfig.hideOnlineStatus) {
+    if (guard.humanTypingSimulation && !stealthNoBlueTick) {
       try {
         await sock.sendPresenceUpdate('composing', jid);
-        const textLen = typeof content?.text === 'string' ? content.text.length : 12;
-        const typingMs = Math.min(1800, Math.max(350, textLen * 28 + Math.floor(Math.random() * 300)));
+        const textLen = typeof content?.text === 'string' ? content.text.length : 10;
+        const typingMs = Math.min(1400, Math.max(300, textLen * 22 + Math.floor(Math.random() * 250)));
         await new Promise((r) => setTimeout(r, typingMs));
         await sock.sendPresenceUpdate('paused', jid);
       } catch {}
     }
   }
 
-  if (typeof content?.text === 'string') {
+  if (typeof content?.text === 'string' && msgIndex > 0) {
     content = {
       ...content,
       text: applyAntiBanTextVariation(content.text, msgIndex),
@@ -234,12 +339,12 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
     }
 
     const baileys = await import('@whiskeysockets/baileys');
+    baileysModule = baileys;
     const makeWASocket: any = typeof baileys.default === 'function' ? baileys.default : baileys.makeWASocket;
     const {
       useMultiFileAuthState,
       fetchLatestBaileysVersion,
       DisconnectReason,
-      downloadMediaMessage,
     } = baileys;
 
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
@@ -254,7 +359,7 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
       logger,
       browser: ['Mac OS', 'Safari', '18.1.0'],
       syncFullHistory: true,
-      markOnlineOnConnect: !waState.modConfig.hideOnlineStatus,
+      markOnlineOnConnect: !waState.modConfig.hideOnlineStatus && !waState.modConfig.antiBlueTick,
       connectTimeoutMs: 60000,
       keepAliveIntervalMs: 25000,
     });
@@ -263,7 +368,10 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
     if (pairingPhone && !state.creds.registered) {
       setTimeout(async () => {
         try {
-          const cleanedPhone = pairingPhone.replace(/[^0-9]/g, '');
+          let cleanedPhone = pairingPhone.replace(/[^0-9]/g, '');
+          if (cleanedPhone.startsWith('0')) {
+            cleanedPhone = '62' + cleanedPhone.slice(1);
+          }
           if (waSocket && cleanedPhone) {
             const code = await waSocket.requestPairingCode(cleanedPhone);
             waState.pairingCode = code;
@@ -271,7 +379,7 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
         } catch (err: any) {
           console.error('Error generating pairing code:', err?.message || err);
         }
-      }, 3000);
+      }, 2500);
     }
 
     sock.ev.on('creds.update', saveCreds);
@@ -320,15 +428,16 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
         waState.lastConnectedTimestamp = Date.now();
 
         if (sock.user) {
-          const rawId = sock.user.id;
-          const phone = rawId.split(':')[0] || rawId.split('@')[0];
+          const normId = normalizeJid(sock.user.id);
+          const phone = normId.split('@')[0];
           const displayName = sock.user.name || `+${phone}`;
           waState.user = {
-            id: rawId,
+            id: normId,
             name: displayName,
             phone: `+${phone}`,
-            avatar: generateAvatarSvg(displayName, '#059669'),
+            avatar: getAvatarForJid(normId, displayName),
           };
+          queueProfilePicFetch(normId);
         }
 
         if (waState.modConfig.hideOnlineStatus) {
@@ -340,13 +449,46 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
       }
     });
 
-    // Helper to process a single WAMessage (handles history sync, normal messages, ViewOnce, Status broadcasts, and Anti-Revoke)
-    const processIncomingMessage = async (msg: any) => {
+    const handleRevokeKey = (remoteJid: string, targetMsgId: string) => {
+      const normJid = normalizeJid(remoteJid);
+      const chatMsgs = waState.messages.get(normJid) || [];
+      let found = false;
+      const updated = chatMsgs.map((m) => {
+        if (m.id === targetMsgId) {
+          found = true;
+          if (waState.modConfig.antiRevokeMessage) {
+            return {
+              ...m,
+              isRevoked: true,
+            };
+          } else {
+            return {
+              ...m,
+              isRevoked: true,
+              text: '🚫 Pesan ini telah dihapus',
+              attachments: undefined,
+            };
+          }
+        }
+        return m;
+      });
+      if (found) {
+        waState.messages.set(normJid, updated);
+        const chat = waState.chats.get(normJid);
+        if (chat && chat.lastMessage?.id === targetMsgId) {
+          chat.lastMessage = updated[updated.length - 1];
+          waState.chats.set(normJid, chat);
+        }
+      }
+    };
+
+    const processIncomingMessage = async (msg: any, isHistorySync = false) => {
       if (!msg?.key?.remoteJid) return;
-      const remoteJid = msg.key.remoteJid;
-      if (remoteJid === 'status@broadcast') {
-        // Handle Status / Story Broadcast!
-        const participant = msg.key.participant || msg.participant || 'status_user';
+      const rawJid = msg.key.remoteJidAlt || msg.key.remoteJid;
+      const remoteJid = normalizeJid(rawJid);
+
+      if (msg.key.remoteJid === 'status@broadcast' || remoteJid === 'status@broadcast') {
+        const participant = normalizeJid(msg.key.participant || msg.participant || '');
         if (!participant) return;
 
         const { innerMessage } = unwrapMessageContent(msg.message);
@@ -354,7 +496,8 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
 
         const contactObj = waState.contacts.get(participant);
         const senderName = msg.pushName || contactObj?.name || `+${participant.split('@')[0]}`;
-        const time = new Date(((msg.messageTimestamp as number) || Math.floor(Date.now() / 1000)) * 1000);
+        const rawTs = Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000);
+        const time = new Date(rawTs * 1000);
         const timeStr = time.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
         let storyType: 'image' | 'video' | 'text' = 'text';
@@ -364,8 +507,9 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
           innerMessage.imageMessage?.caption ||
           innerMessage.videoMessage?.caption ||
           'Pembaruan Status';
-        let caption = innerMessage.imageMessage?.caption || innerMessage.videoMessage?.caption || '';
-        let fileName = `Status_${senderName.replace(/[^a-zA-Z0-9]/g, '_')}_${msg.key.id}.jpg`;
+        const caption = innerMessage.imageMessage?.caption || innerMessage.videoMessage?.caption || '';
+        const safeId = (msg.key.id || `st_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '');
+        let fileName = `Status_${safeId}.jpg`;
         let mimeType = 'text/plain';
 
         if (innerMessage.imageMessage || innerMessage.videoMessage) {
@@ -374,24 +518,20 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
           const mediaMsg = innerMessage.imageMessage || innerMessage.videoMessage;
           mimeType = mediaMsg?.mimetype || (isVideo ? 'video/mp4' : 'image/jpeg');
           const ext = isVideo ? 'mp4' : 'jpg';
-          fileName = `Status_${senderName.replace(/[^a-zA-Z0-9]/g, '_')}_${msg.key.id}.${ext}`;
+          fileName = `Status_${safeId}.${ext}`;
 
-          if (waState.modConfig.autoSaveStatus) {
-            try {
-              const buffer = await downloadMediaMessage(
-                msg,
-                'buffer',
-                {},
-                { logger, reuploadRequest: sock.updateMediaMessage }
-              );
-              if (buffer) {
-                const savedPath = path.join(MEDIA_CACHE_DIR, fileName);
-                fs.writeFileSync(savedPath, buffer);
-                contentUrlOrText = `/api/media-file/${encodeURIComponent(fileName)}`;
-              }
-            } catch (e) {
-              // Fallback if media download fails on older status
-            }
+          waState.rawMediaMessages.set(safeId, {
+            innerMedia: mediaMsg,
+            mediaType: storyType,
+            fileName,
+            mimeType,
+          });
+
+          const localUrl = await downloadAndSaveMedia(mediaMsg, storyType, fileName);
+          if (localUrl) {
+            contentUrlOrText = localUrl;
+          } else {
+            contentUrlOrText = `/api/whatsapp/media/${encodeURIComponent(safeId)}`;
           }
         }
 
@@ -399,14 +539,14 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
           id: `story_${participant}`,
           contactId: participant,
           contactName: senderName,
-          contactAvatar: generateAvatarSvg(senderName, '#6366f1'),
+          contactAvatar: getAvatarForJid(participant, senderName),
           updatedAt: `Hari ini, ${timeStr}`,
           stories: [],
         };
 
-        if (!existingStory.stories.some((s: any) => s.id === msg.key.id)) {
+        if (!existingStory.stories.some((s: any) => s.id === safeId)) {
           existingStory.stories.push({
-            id: msg.key.id || `st_${Date.now()}`,
+            id: safeId,
             type: storyType,
             content: contentUrlOrText,
             caption,
@@ -416,31 +556,20 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
             mimeType,
           });
           existingStory.updatedAt = `Hari ini, ${timeStr}`;
+          existingStory.contactAvatar = getAvatarForJid(participant, senderName);
           waState.stories.set(participant, existingStory);
         }
         return;
       }
 
-      // Ignore broadcast/newsletter channels if empty
-      if (remoteJid.endsWith('@broadcast')) return;
+      if (remoteJid.endsWith('@broadcast') || remoteJid.endsWith('@newsletter')) return;
 
       waState.knownInteractedJids.add(remoteJid);
 
       // Check for message revoke (protocolMessage REVOKE)
       const protoMsg = msg.message?.protocolMessage;
-      if (protoMsg && protoMsg.type === 0 && protoMsg.key?.id) {
-        const targetId = protoMsg.key.id;
-        const chatMsgs = waState.messages.get(remoteJid) || [];
-        const updated = chatMsgs.map((m) =>
-          m.id === targetId
-            ? {
-                ...m,
-                isRevoked: true,
-                text: `${m.text || ''} [🛡️ Anti-Delete: Pesan ini telah dihapus oleh pengirim]`.trim(),
-              }
-            : m
-        );
-        waState.messages.set(remoteJid, updated);
+      if (protoMsg && (protoMsg.type === 0 || protoMsg.type === 'REVOKE') && protoMsg.key?.id) {
+        handleRevokeKey(remoteJid, protoMsg.key.id);
         return;
       }
 
@@ -456,7 +585,7 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
         innerMessage.documentMessage?.caption ||
         '';
 
-      const rawTs = (msg.messageTimestamp as number) || Math.floor(Date.now() / 1000);
+      const rawTs = Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000);
       const time = new Date(rawTs * 1000);
       const timeStr = time.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
       const fullTimeStr = `${time.toLocaleDateString('id-ID')}, ${timeStr}`;
@@ -468,6 +597,11 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
         innerMessage.audioMessage ||
         innerMessage.documentMessage;
 
+      const safeId = (msg.key.id || `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`).replace(
+        /[^a-zA-Z0-9_-]/g,
+        ''
+      );
+
       if (hasMedia) {
         let attType: 'image' | 'video' | 'audio' | 'document' = 'document';
         let mimeType = 'application/octet-stream';
@@ -475,54 +609,68 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
         let fileSize = '150 KB';
         let duration: string | undefined;
         let origName = '';
+        let mediaObj: any = null;
 
         if (innerMessage.imageMessage) {
           attType = 'image';
-          mimeType = innerMessage.imageMessage.mimetype || 'image/jpeg';
+          mediaObj = innerMessage.imageMessage;
+          mimeType = mediaObj.mimetype || 'image/jpeg';
           ext = 'jpg';
-          fileSize = formatBytesServer(Number(innerMessage.imageMessage.fileLength || 180000));
+          fileSize = formatBytesServer(Number(mediaObj.fileLength || 180000));
         } else if (innerMessage.videoMessage) {
           attType = 'video';
-          mimeType = innerMessage.videoMessage.mimetype || 'video/mp4';
+          mediaObj = innerMessage.videoMessage;
+          mimeType = mediaObj.mimetype || 'video/mp4';
           ext = 'mp4';
-          fileSize = formatBytesServer(Number(innerMessage.videoMessage.fileLength || 1200000));
-          if (innerMessage.videoMessage.seconds) {
-            duration = `0:${String(innerMessage.videoMessage.seconds).padStart(2, '0')}`;
+          fileSize = formatBytesServer(Number(mediaObj.fileLength || 1200000));
+          if (mediaObj.seconds) {
+            duration = `0:${String(mediaObj.seconds).padStart(2, '0')}`;
           }
         } else if (innerMessage.audioMessage) {
           attType = 'audio';
-          mimeType = innerMessage.audioMessage.mimetype || 'audio/ogg';
+          mediaObj = innerMessage.audioMessage;
+          mimeType = mediaObj.mimetype || 'audio/ogg';
           ext = 'ogg';
-          fileSize = formatBytesServer(Number(innerMessage.audioMessage.fileLength || 64000));
-          const secs = innerMessage.audioMessage.seconds || 15;
+          fileSize = formatBytesServer(Number(mediaObj.fileLength || 64000));
+          const secs = mediaObj.seconds || 15;
           duration = `0:${String(secs).padStart(2, '0')}`;
         } else if (innerMessage.documentMessage) {
           attType = 'document';
-          mimeType = innerMessage.documentMessage.mimetype || 'application/pdf';
-          origName = innerMessage.documentMessage.fileName || '';
+          mediaObj = innerMessage.documentMessage;
+          mimeType = mediaObj.mimetype || 'application/pdf';
+          origName = mediaObj.fileName || '';
           ext = origName.split('.').pop() || 'pdf';
-          fileSize = formatBytesServer(Number(innerMessage.documentMessage.fileLength || 450000));
+          fileSize = formatBytesServer(Number(mediaObj.fileLength || 450000));
         }
 
-        const safeId = (msg.key.id || `${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '');
         const finalFileName =
-          origName || `${isViewOnce ? 'VIEWONCE_UNLOCKED_' : 'WA_'}${attType.toUpperCase()}_${safeId}.${ext}`;
-        let fileUrl = '';
+          origName || `${isViewOnce ? '1X_LIHAT_' : 'WA_'}${attType.toUpperCase()}_${safeId}.${ext}`;
 
-        try {
-          const buffer = await downloadMediaMessage(
-            { ...msg, message: innerMessage },
-            'buffer',
-            {},
-            { logger, reuploadRequest: sock.updateMediaMessage }
-          );
-          if (buffer) {
-            const savedPath = path.join(MEDIA_CACHE_DIR, finalFileName);
-            fs.writeFileSync(savedPath, buffer);
-            fileUrl = `/api/media-file/${encodeURIComponent(finalFileName)}`;
-          }
-        } catch (err) {
-          // Media might be expired on server during old history sync
+        if (mediaObj) {
+          waState.rawMediaMessages.set(safeId, {
+            innerMedia: mediaObj,
+            mediaType: attType,
+            fileName: finalFileName,
+            mimeType,
+          });
+        }
+
+        // Always provide our on-demand decrypting media endpoint URL so it works immediately and when clicked!
+        let fileUrl = `/api/whatsapp/media/${encodeURIComponent(safeId)}`;
+
+        // Pre-download in background for live messages or ViewOnce messages
+        if (!isHistorySync || isViewOnce) {
+          downloadAndSaveMedia(mediaObj, attType, finalFileName)
+            .then((savedUrl) => {
+              if (savedUrl) {
+                const list = waState.messages.get(remoteJid) || [];
+                const target = list.find((m) => m.id === safeId);
+                if (target && target.attachments?.[0]) {
+                  target.attachments[0].url = savedUrl;
+                }
+              }
+            })
+            .catch(() => {});
         }
 
         attachments.push({
@@ -545,15 +693,27 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
         ? waState.user?.name || 'Anda'
         : msg.pushName || contactInfo?.name || fallbackPhone;
 
+      if (!isOut && msg.pushName && (!contactInfo || contactInfo.name.startsWith('+'))) {
+        waState.contacts.set(remoteJid, {
+          id: remoteJid,
+          name: msg.pushName,
+          phone: fallbackPhone,
+          about: 'Kontak WhatsApp',
+          avatar: getAvatarForJid(remoteJid, msg.pushName),
+          isOnline: true,
+        });
+      }
+
       const parsedMsg = {
-        id: msg.key.id || `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        id: safeId,
         chatId: remoteJid,
         senderId: isOut ? 'me' : remoteJid,
         senderName,
         isOutgoing: isOut,
-        text: isViewOnce && !text ? '🔓 [Media 1x Lihat Terbuka Otomatis]' : text,
+        text: isViewOnce && !text ? '🔓 [Media 1x Lihat]' : text,
         timestamp: timeStr,
         fullTimestamp: fullTimeStr,
+        rawTimestamp: rawTs,
         status: isOut ? 'read' : 'delivered',
         isViewOnce,
         attachments: attachments.length > 0 ? attachments : undefined,
@@ -562,55 +722,62 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
 
       const existingMsgs = waState.messages.get(remoteJid) || [];
       if (!existingMsgs.some((m) => m.id === parsedMsg.id)) {
-        const updatedMsgs = [...existingMsgs, parsedMsg];
+        const updatedMsgs = [...existingMsgs, parsedMsg].sort(
+          (a, b) => (a.rawTimestamp || 0) - (b.rawTimestamp || 0)
+        );
         waState.messages.set(remoteJid, updatedMsgs);
 
         const existingChat = waState.chats.get(remoteJid);
+        const latestContact = waState.contacts.get(remoteJid);
         const chatName =
-          existingChat?.name ||
-          contactInfo?.name ||
+          (existingChat?.name && !existingChat.name.startsWith('+') ? existingChat.name : '') ||
+          latestContact?.name ||
           (!isOut && msg.pushName ? msg.pushName : fallbackPhone);
 
         waState.chats.set(remoteJid, {
           id: remoteJid,
           name: chatName,
           isGroup: remoteJid.endsWith('@g.us'),
-          avatar: existingChat?.avatar || generateAvatarSvg(chatName, remoteJid.endsWith('@g.us') ? '#0ea5e9' : '#10b981'),
-          unreadCount: isOut ? 0 : (existingChat?.unreadCount || 0) + 1,
+          avatar: getAvatarForJid(remoteJid, chatName),
+          unreadCount: isOut ? 0 : (existingChat?.unreadCount || 0) + (isHistorySync ? 0 : 1),
           isPinned: existingChat?.isPinned || false,
           isArchived: false,
           isMuted: existingChat?.isMuted || false,
-          lastMessage: parsedMsg,
+          lastMessage: updatedMsgs[updatedMsgs.length - 1] || parsedMsg,
         });
       }
     };
 
-    // Full history sync event when linking device
+    // History sync event
     sock.ev.on('messaging-history.set', async ({ chats, contacts, messages }) => {
       contacts.forEach((c: any) => {
         if (!c?.id) return;
-        const name = c.name || c.notify || c.verifiedName || `+${c.id.split('@')[0]}`;
-        waState.contacts.set(c.id, {
-          id: c.id,
+        const normId = normalizeJid(c.id);
+        if (!normId || normId.endsWith('@broadcast')) return;
+        const name = c.name || c.notify || c.verifiedName || `+${normId.split('@')[0]}`;
+        waState.contacts.set(normId, {
+          id: normId,
           name,
-          phone: `+${c.id.split('@')[0]}`,
+          phone: `+${normId.split('@')[0]}`,
           about: 'Kontak WhatsApp',
-          avatar: generateAvatarSvg(name, '#6366f1'),
+          avatar: getAvatarForJid(normId, name),
           isOnline: true,
         });
       });
 
       chats.forEach((c: any) => {
-        if (!c?.id || c.id === 'status@broadcast' || c.id.endsWith('@broadcast')) return;
-        const contactInfo = waState.contacts.get(c.id);
-        const name = c.name || contactInfo?.name || `+${c.id.split('@')[0]}`;
-        const existing = waState.chats.get(c.id) || {};
-        waState.chats.set(c.id, {
+        if (!c?.id) return;
+        const normId = normalizeJid(c.id);
+        if (!normId || normId === 'status@broadcast' || normId.endsWith('@broadcast')) return;
+        const contactInfo = waState.contacts.get(normId);
+        const name = c.name || contactInfo?.name || `+${normId.split('@')[0]}`;
+        const existing = waState.chats.get(normId) || {};
+        waState.chats.set(normId, {
           ...existing,
-          id: c.id,
+          id: normId,
           name,
-          isGroup: c.id.endsWith('@g.us'),
-          avatar: existing.avatar || generateAvatarSvg(name, c.id.endsWith('@g.us') ? '#0ea5e9' : '#10b981'),
+          isGroup: normId.endsWith('@g.us'),
+          avatar: getAvatarForJid(normId, name),
           unreadCount: c.unreadCount || 0,
           isPinned: Boolean(c.pinned),
           isArchived: Boolean(c.archived),
@@ -618,61 +785,120 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
         });
       });
 
-      for (const m of messages.slice(-150)) {
-        await processIncomingMessage(m);
+      const recentMessages = messages.slice(-250);
+      for (const m of recentMessages) {
+        await processIncomingMessage(m, true);
       }
     });
 
     sock.ev.on('contacts.upsert', (contacts) => {
       contacts.forEach((c) => {
         if (!c.id) return;
-        const name = c.name || c.notify || `+${c.id.split('@')[0]}`;
-        waState.contacts.set(c.id, {
-          id: c.id,
+        const normId = normalizeJid(c.id);
+        const name = c.name || c.notify || c.verifiedName || `+${normId.split('@')[0]}`;
+        const avatar = getAvatarForJid(normId, name);
+        waState.contacts.set(normId, {
+          id: normId,
           name,
-          phone: `+${c.id.split('@')[0]}`,
+          phone: `+${normId.split('@')[0]}`,
           about: 'Kontak WhatsApp',
-          avatar: generateAvatarSvg(name, '#6366f1'),
+          avatar,
           isOnline: true,
         });
-        const existingChat = waState.chats.get(c.id);
+        const existingChat = waState.chats.get(normId);
         if (existingChat) {
           existingChat.name = name;
-          waState.chats.set(c.id, existingChat);
+          existingChat.avatar = avatar;
+          waState.chats.set(normId, existingChat);
+        }
+      });
+    });
+
+    sock.ev.on('contacts.update', (updates) => {
+      updates.forEach((u) => {
+        if (!u.id) return;
+        const normId = normalizeJid(u.id);
+        const existing = waState.contacts.get(normId);
+        const name = u.name || u.notify || u.verifiedName || existing?.name || `+${normId.split('@')[0]}`;
+        const avatar = getAvatarForJid(normId, name);
+        waState.contacts.set(normId, {
+          ...(existing || {}),
+          id: normId,
+          name,
+          phone: `+${normId.split('@')[0]}`,
+          about: 'Kontak WhatsApp',
+          avatar,
+          isOnline: true,
+        });
+        const existingChat = waState.chats.get(normId);
+        if (existingChat) {
+          if (u.name || u.notify) existingChat.name = name;
+          existingChat.avatar = avatar;
+          waState.chats.set(normId, existingChat);
         }
       });
     });
 
     sock.ev.on('chats.upsert', (chats) => {
       chats.forEach((c) => {
-        if (!c.id || c.id === 'status@broadcast' || c.id.endsWith('@broadcast')) return;
-        const existing = waState.chats.get(c.id) || {};
-        const contactInfo = waState.contacts.get(c.id);
-        const name = c.name || existing.name || contactInfo?.name || `+${c.id.split('@')[0]}`;
-        waState.chats.set(c.id, {
+        if (!c.id) return;
+        const normId = normalizeJid(c.id);
+        if (normId === 'status@broadcast' || normId.endsWith('@broadcast')) return;
+        const existing = waState.chats.get(normId) || {};
+        const contactInfo = waState.contacts.get(normId);
+        const name = c.name || existing.name || contactInfo?.name || `+${normId.split('@')[0]}`;
+        waState.chats.set(normId, {
           ...existing,
-          id: c.id,
+          id: normId,
           name,
-          isGroup: c.id.endsWith('@g.us'),
-          avatar: existing.avatar || generateAvatarSvg(name, c.id.endsWith('@g.us') ? '#0ea5e9' : '#10b981'),
+          isGroup: normId.endsWith('@g.us'),
+          avatar: getAvatarForJid(normId, name),
           unreadCount: c.unreadCount ?? existing.unreadCount ?? 0,
-          isPinned: existing.isPinned ?? false,
+          isPinned: existing.isPinned ?? Boolean(c.pinned),
           isArchived: false,
-          isMuted: existing.isMuted ?? false,
+          isMuted: existing.isMuted ?? Boolean(c.muteEndTime),
         });
       });
     });
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
       for (const msg of messages) {
-        await processIncomingMessage(msg);
+        await processIncomingMessage(msg, false);
       }
     });
 
-    // Real Incoming / Outgoing Call Events
+    // Listen to messages.update for Anti-Revoke & Read Receipt status updates
+    sock.ev.on('messages.update', (updates) => {
+      for (const { key, update } of updates) {
+        if (!key?.remoteJid || !key?.id) continue;
+        const normJid = normalizeJid(key.remoteJid);
+        const safeId = key.id.replace(/[^a-zA-Z0-9_-]/g, '');
+
+        // Check if message was revoked/deleted for everyone (messageStubType === 1 or protocolMessage REVOKE)
+        if (
+          update.messageStubType === 1 ||
+          update.message === null ||
+          update.message?.protocolMessage?.type === 0
+        ) {
+          handleRevokeKey(normJid, safeId);
+          continue;
+        }
+
+        // Update delivery/read ticks for outgoing messages
+        if (update.status) {
+          const list = waState.messages.get(normJid) || [];
+          const msg = list.find((m) => m.id === safeId);
+          if (msg) {
+            msg.status = update.status >= 4 ? 'read' : update.status >= 3 ? 'delivered' : 'sent';
+          }
+        }
+      }
+    });
+
+    // Call events
     sock.ev.on('call', (callEvents) => {
       callEvents.forEach((call) => {
-        const callerId = call.from || call.chatId || 'unknown@s.whatsapp.net';
+        const callerId = normalizeJid(call.from || call.chatId || 'unknown@s.whatsapp.net');
         const contact = waState.contacts.get(callerId);
         const callerName = contact?.name || `+${callerId.split('@')[0]}`;
         const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
@@ -682,7 +908,7 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
           id: call.id,
           contactId: callerId,
           contactName: callerName,
-          contactAvatar: generateAvatarSvg(callerName, '#ec4899'),
+          contactAvatar: getAvatarForJid(callerId, callerName),
           type: call.isVideo ? 'video' : 'audio',
           direction: call.status === 'reject' || call.status === 'timeout' ? 'missed' : 'incoming',
           timestamp: `Hari ini, ${timeStr}`,
@@ -703,6 +929,29 @@ async function startWhatsApp(pairingPhone?: string): Promise<void> {
     isStarting = false;
   }
 }
+
+// On-demand media decryption endpoint (unlocks ViewOnce 1x Lihat & Status media anytime)
+app.get('/api/whatsapp/media/:msgId', async (req: Request, res: Response) => {
+  const { msgId } = req.params;
+  const entry = waState.rawMediaMessages.get(msgId);
+  if (!entry) {
+    return res.status(404).send('Media tidak ditemukan atau sudah kedaluwarsa.');
+  }
+
+  const savedPath = path.join(MEDIA_CACHE_DIR, entry.fileName);
+  if (fs.existsSync(savedPath)) {
+    res.setHeader('Content-Type', entry.mimeType);
+    return res.sendFile(savedPath);
+  }
+
+  const downloadedUrl = await downloadAndSaveMedia(entry.innerMedia, entry.mediaType, entry.fileName);
+  if (downloadedUrl && fs.existsSync(savedPath)) {
+    res.setHeader('Content-Type', entry.mimeType);
+    return res.sendFile(savedPath);
+  }
+
+  return res.status(404).send('Gagal mendekripsi media dari server WhatsApp.');
+});
 
 // REST API Endpoints
 app.get('/api/whatsapp/status', (_req: Request, res: Response) => {
@@ -738,6 +987,8 @@ app.post('/api/whatsapp/logout', async (_req: Request, res: Response) => {
     waState.qrCodeDataUrl = null;
     waState.chats.clear();
     waState.messages.clear();
+    waState.rawMediaMessages.clear();
+    waState.profilePics.clear();
     waState.stories.clear();
     waState.calls = [];
     res.json({ success: true, message: 'Berhasil keluar dan menghapus sesi.' });
@@ -750,28 +1001,47 @@ app.get('/api/whatsapp/chats', (_req: Request, res: Response) => {
   const chatList = Array.from(waState.chats.values())
     .map((chat) => {
       const msgs = waState.messages.get(chat.id) || [];
+      const avatar = getAvatarForJid(chat.id, chat.name);
       return {
         ...chat,
+        avatar,
         messages: msgs,
-        lastMessage: chat.lastMessage || msgs[msgs.length - 1] || {
-          id: 'empty',
-          chatId: chat.id,
-          senderId: chat.id,
-          senderName: chat.name,
-          isOutgoing: false,
-          text: 'Ketuk untuk mulai percakapan',
-          timestamp: '',
-          fullTimestamp: '',
-          status: 'read',
-        },
+        lastMessage:
+          msgs[msgs.length - 1] ||
+          chat.lastMessage || {
+            id: 'empty',
+            chatId: chat.id,
+            senderId: chat.id,
+            senderName: chat.name,
+            isOutgoing: false,
+            text: 'Ketuk untuk mulai percakapan',
+            timestamp: '',
+            fullTimestamp: '',
+            status: 'read',
+          },
       };
     })
-    .filter((c) => c.messages.length > 0 || c.name);
+    .filter((c) => c.messages.length > 0 || c.name)
+    .sort((a, b) => {
+      const tsA = a.lastMessage?.rawTimestamp || 0;
+      const tsB = b.lastMessage?.rawTimestamp || 0;
+      return tsB - tsA;
+    });
+
+  const contactsList = Array.from(waState.contacts.values()).map((c) => ({
+    ...c,
+    avatar: getAvatarForJid(c.id, c.name),
+  }));
+
+  const storiesList = Array.from(waState.stories.values()).map((s) => ({
+    ...s,
+    contactAvatar: getAvatarForJid(s.contactId, s.contactName),
+  }));
 
   res.json({
     chats: chatList,
-    contacts: Array.from(waState.contacts.values()),
-    stories: Array.from(waState.stories.values()),
+    contacts: contactsList,
+    stories: storiesList,
     calls: waState.calls,
     isReal: waState.status === 'connected',
   });
@@ -781,20 +1051,21 @@ app.get('/api/whatsapp/chats', (_req: Request, res: Response) => {
 app.post('/api/whatsapp/read', async (req: Request, res: Response) => {
   const { chatId } = req.body;
   if (!chatId) return res.status(400).json({ error: 'chatId required' });
+  const normJid = normalizeJid(chatId);
 
-  const chat = waState.chats.get(chatId);
+  const chat = waState.chats.get(normJid);
   if (chat) {
     chat.unreadCount = 0;
-    waState.chats.set(chatId, chat);
+    waState.chats.set(normJid, chat);
   }
 
-  // Stealth Blue Tick Control: ONLY send readMessages if antiBlueTick is FALSE
+  // Stealth Blue Tick Control: ONLY send readMessages if antiBlueTick is FALSE (OFF)
   if (!waState.modConfig.antiBlueTick && waSocket && waState.status === 'connected') {
-    const msgs = waState.messages.get(chatId) || [];
+    const msgs = waState.messages.get(normJid) || [];
     const unreadKeys = msgs.filter((m) => !m.isOutgoing && m.rawKey).map((m) => m.rawKey);
     if (unreadKeys.length > 0) {
       try {
-        await waSocket.readMessages(unreadKeys);
+        await waSocket.readMessages(unreadKeys.slice(-20));
       } catch {}
     }
   }
@@ -816,39 +1087,95 @@ app.post('/api/whatsapp/mod-config', async (req: Request, res: Response) => {
 
   if (waSocket && waState.status === 'connected') {
     try {
-      await waSocket.sendPresenceUpdate(waState.modConfig.hideOnlineStatus ? 'unavailable' : 'available');
+      await waSocket.sendPresenceUpdate(
+        waState.modConfig.hideOnlineStatus || waState.modConfig.antiBlueTickOnReply
+          ? 'unavailable'
+          : 'available'
+      );
     } catch {}
   }
 
   res.json({ success: true, modConfig: waState.modConfig });
 });
 
-// Send Single Message (with Anti-Blue-Tick-On-Reply and Anti-Ban Guard)
+// Send Single Message or Media Attachment (with Anti-Blue-Tick-On-Reply and Anti-Ban Guard)
 app.post('/api/whatsapp/send', async (req: Request, res: Response) => {
-  const { chatId, text } = req.body;
+  const { chatId, text, mediaBase64, mediaType, mimeType, fileName } = req.body;
   if (!waSocket || waState.status !== 'connected') {
     return res.status(400).json({ error: 'WhatsApp belum terhubung. Silakan pindai QR terlebih dahulu.' });
   }
-  if (!chatId || !text) {
-    return res.status(400).json({ error: 'chatId dan text wajib diisi.' });
+  if (!chatId || (!text && !mediaBase64)) {
+    return res.status(400).json({ error: 'chatId dan pesan/media wajib diisi.' });
   }
 
   try {
-    const formattedJid = chatId.includes('@') ? chatId : `${chatId.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
+    const formattedJid = normalizeJid(
+      chatId.includes('@') ? chatId : `${chatId.replace(/[^0-9]/g, '')}@s.whatsapp.net`
+    );
 
-    // Notice: even when replying, if antiBlueTickOnReply is enabled, we DO NOT call sock.readMessages()!
+    // If antiBlueTickOnReply is OFF and antiBlueTick is OFF, send normal read receipts on reply
     if (!waState.modConfig.antiBlueTickOnReply && !waState.modConfig.antiBlueTick) {
       const msgs = waState.messages.get(formattedJid) || [];
       const unreadKeys = msgs.filter((m) => !m.isOutgoing && m.rawKey).map((m) => m.rawKey);
       if (unreadKeys.length > 0) {
         try {
-          await waSocket.readMessages(unreadKeys);
+          await waSocket.readMessages(unreadKeys.slice(-15));
         } catch {}
       }
     }
 
-    const sent = await sendSafeAntiBanMessage(waSocket, formattedJid, { text }, 0);
-    res.json({ success: true, sent });
+    let messagePayload: any = { text: text || '' };
+    if (mediaBase64) {
+      const base64Data = mediaBase64.includes(',') ? mediaBase64.split(',')[1] : mediaBase64;
+      const buf = Buffer.from(base64Data, 'base64');
+      if (mediaType === 'image') {
+        messagePayload = { image: buf, caption: text || undefined, mimetype: mimeType || 'image/jpeg' };
+      } else if (mediaType === 'video') {
+        messagePayload = { video: buf, caption: text || undefined, mimetype: mimeType || 'video/mp4' };
+      } else if (mediaType === 'audio') {
+        messagePayload = { audio: buf, ptt: true, mimetype: mimeType || 'audio/ogg; codecs=opus' };
+      } else {
+        messagePayload = {
+          document: buf,
+          fileName: fileName || 'Dokumen.pdf',
+          caption: text || undefined,
+          mimetype: mimeType || 'application/octet-stream',
+        };
+      }
+    }
+
+    const sent = await sendSafeAntiBanMessage(waSocket, formattedJid, messagePayload, 0);
+
+    // Record outgoing message in waState immediately
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    const fullTimeStr = `${now.toLocaleDateString('id-ID')}, ${timeStr}`;
+    const safeSentId = (sent?.key?.id || `out_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '');
+    const outMsg = {
+      id: safeSentId,
+      chatId: formattedJid,
+      senderId: 'me',
+      senderName: waState.user?.name || 'Anda',
+      isOutgoing: true,
+      text: text || fileName || 'Media terkirim',
+      timestamp: timeStr,
+      fullTimestamp: fullTimeStr,
+      rawTimestamp: Math.floor(Date.now() / 1000),
+      status: 'sent',
+      rawKey: sent?.key,
+    };
+
+    const existingMsgs = waState.messages.get(formattedJid) || [];
+    if (!existingMsgs.some((m) => m.id === safeSentId)) {
+      waState.messages.set(formattedJid, [...existingMsgs, outMsg]);
+    }
+    const existingChat = waState.chats.get(formattedJid);
+    if (existingChat) {
+      existingChat.lastMessage = outMsg;
+      waState.chats.set(formattedJid, existingChat);
+    }
+
+    res.json({ success: true, sentId: safeSentId });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -864,11 +1191,15 @@ app.post('/api/whatsapp/boom', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'chatId, pesan, dan jumlah kirim wajib diisi.' });
   }
   if (waState.boomStatus.isRunning) {
-    return res.status(400).json({ error: 'Chat Boom sedang berjalan. Hentikan terlebih dahulu jika ingin memulai baru.' });
+    return res
+      .status(400)
+      .json({ error: 'Chat Boom sedang berjalan. Klik Stop jika ingin memulai ulang.' });
   }
 
   const totalToSend = Math.min(Math.max(1, Number(count)), 500);
-  const formattedJid = chatId.includes('@') ? chatId : `${chatId.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
+  const formattedJid = normalizeJid(
+    chatId.includes('@') ? chatId : `${chatId.replace(/[^0-9]/g, '')}@s.whatsapp.net`
+  );
 
   waState.boomStatus = {
     isRunning: true,
@@ -881,10 +1212,12 @@ app.post('/api/whatsapp/boom', async (req: Request, res: Response) => {
     cancelRequested: false,
   };
 
-  // Run boom asynchronously in background with Anti-Ban Adaptive Jitter
   (async () => {
     const sock = waSocket;
-    if (!sock) return;
+    if (!sock) {
+      waState.boomStatus.isRunning = false;
+      return;
+    }
 
     for (let i = 0; i < totalToSend; i++) {
       if (waState.boomStatus.cancelRequested || waState.status !== 'connected') {
@@ -892,15 +1225,15 @@ app.post('/api/whatsapp/boom', async (req: Request, res: Response) => {
       }
 
       try {
-        await sendSafeAntiBanMessage(sock, formattedJid, { text }, i);
+        const sent = await sendSafeAntiBanMessage(sock, formattedJid, { text }, i);
         waState.boomStatus.sent = i + 1;
 
-        // Add optimistic message to local state if not echoed yet
         const now = new Date();
         const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
         const fullTimeStr = `${now.toLocaleDateString('id-ID')}, ${timeStr}`;
+        const safeId = (sent?.key?.id || `boom_${Date.now()}_${i}`).replace(/[^a-zA-Z0-9_-]/g, '');
         const localMsg = {
-          id: `boom_${Date.now()}_${i}`,
+          id: safeId,
           chatId: formattedJid,
           senderId: 'me',
           senderName: waState.user?.name || 'Anda',
@@ -908,24 +1241,31 @@ app.post('/api/whatsapp/boom', async (req: Request, res: Response) => {
           text,
           timestamp: timeStr,
           fullTimestamp: fullTimeStr,
-          status: 'read',
+          rawTimestamp: Math.floor(Date.now() / 1000),
+          status: 'sent',
         };
-        const existingMsgs = waState.messages.get(formattedJid) || [];
-        waState.messages.set(formattedJid, [...existingMsgs, localMsg]);
+        const currMsgs = waState.messages.get(formattedJid) || [];
+        if (!currMsgs.some((m) => m.id === safeId)) {
+          waState.messages.set(formattedJid, [...currMsgs, localMsg]);
+        }
+        const chat = waState.chats.get(formattedJid);
+        if (chat) {
+          chat.lastMessage = localMsg;
+          waState.chats.set(formattedJid, chat);
+        }
       } catch (err: any) {
-        waState.boomStatus.lastError = err?.message || 'Gagal mengirim pesan';
+        waState.boomStatus.lastError = err?.message || 'Gagal mengirim salah satu pesan boom';
       }
 
       if (i < totalToSend - 1 && !waState.boomStatus.cancelRequested) {
         const guard = waState.modConfig.antiBanGuard;
-        let delayMs = 600;
+        let delayMs = 650;
         if (guard.enabled && guard.adaptiveJitterDelay) {
           const min = Math.max(400, guard.minDelayMs || 1200);
           const max = Math.max(min + 300, guard.maxDelayMs || 2800);
           delayMs = min + Math.floor(Math.random() * (max - min));
-          // Extra cooldown pause every 10 messages to bypass rate-limit buckets
           if ((i + 1) % 10 === 0) {
-            delayMs += 2500;
+            delayMs += 2000 + Math.floor(Math.random() * 1500);
           }
         }
         waState.boomStatus.currentDelayMs = delayMs;
@@ -934,11 +1274,12 @@ app.post('/api/whatsapp/boom', async (req: Request, res: Response) => {
     }
 
     waState.boomStatus.isRunning = false;
+    waState.boomStatus.currentDelayMs = 0;
   })();
 
   res.json({
     success: true,
-    message: `Chat Boom dimulai: mengirim "${text}" sebanyak ${totalToSend}x dengan proteksi Anti-Ban.`,
+    message: `Chat Boom dimulai: mengirim ${totalToSend} pesan.`,
     boomStatus: waState.boomStatus,
   });
 });
@@ -949,74 +1290,60 @@ app.post('/api/whatsapp/boom/stop', (_req: Request, res: Response) => {
   res.json({ success: true, boomStatus: waState.boomStatus });
 });
 
-// Download full project source code as a ready-to-build ZIP archive
+// Downloadable Full Project Source Code ZIP Endpoint
 app.get('/api/source-zip', async (_req: Request, res: Response) => {
   try {
     const JSZipModule = await import('jszip');
     const JSZip = JSZipModule.default || JSZipModule;
     const zip = new JSZip();
 
-    const excludedDirs = new Set([
+    const rootDir = process.cwd();
+    const excludeDirs = new Set([
       'node_modules',
       'dist',
+      'build',
       '.git',
       '.baileys_auth',
       '.baileys_media',
       '.playwright-cli',
-      '.aistudio',
+      'artifacts',
     ]);
 
-    const addDirToZip = (dirPath: string, zipFolder: any) => {
-      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    const addFilesRecursively = (currentPath: string, relativePath = '') => {
+      const entries = fs.readdirSync(currentPath, { withFileTypes: true });
       for (const entry of entries) {
-        if (excludedDirs.has(entry.name)) continue;
-        if (entry.name === 'bun.lock' || entry.name.endsWith('.log') || entry.name.endsWith('.zip')) continue;
+        if (excludeDirs.has(entry.name)) continue;
+        if (entry.name.startsWith('.env') && entry.name !== '.env.example') continue;
+        if (entry.name.endsWith('.zip')) continue;
 
-        const fullPath = path.join(dirPath, entry.name);
+        const fullPath = path.join(currentPath, entry.name);
+        const zipEntryPath = relativePath ? path.join(relativePath, entry.name) : entry.name;
+
         if (entry.isDirectory()) {
-          const subFolder = zipFolder.folder(entry.name);
-          addDirToZip(fullPath, subFolder);
+          addFilesRecursively(fullPath, zipEntryPath);
         } else if (entry.isFile()) {
-          const content = fs.readFileSync(fullPath);
-          zipFolder.file(entry.name, content);
+          const fileContent = fs.readFileSync(fullPath);
+          zip.file(zipEntryPath, fileContent);
         }
       }
     };
 
-    addDirToZip(path.resolve('.'), zip);
+    addFilesRecursively(rootDir);
 
-    const readmeContent = `# iGlass WA Companion - Real Multi-Device + Mod & Anti-Ban Edition
+    const zipBuffer = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    });
 
-Aplikasi Full-Stack WhatsApp Companion (Perangkat Tertaut Real) dengan antarmuka **Apple iOS Liquid Glassmorphism**, fitur **Mod Privasi & Anti-Ban**, **Chat Boom**, **Pembuka Foto/Video 1x Lihat**, **Pengunduh Status**, dan **Ekspor Otomatis**.
-
-## Cara Menjalankan & Build Secara Lokal
-
-Pastikan Anda telah menginstal **Node.js v20+ (direkomendasikan v22 LTS)**.
-
-### 1. Instal Dependensi
-\`\`\`bash
-npm install
-\`\`\`
-
-### 2. Jalankan Server Full-Stack
-\`\`\`bash
-npm run dev
-\`\`\`
-Buka \`http://localhost:3000\` di browser Anda, lalu scan QR Code menggunakan aplikasi WhatsApp di HP Anda.
-`;
-    zip.file('README.md', readmeContent);
-
-    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="iGlass-WA-Companion-SourceCode.zip"');
     res.send(zipBuffer);
   } catch (err: any) {
-    console.error('Error generating source zip:', err);
-    res.status(500).json({ error: err?.message || 'Gagal membuat arsip source code.' });
+    res.status(500).json({ error: 'Gagal membuat arsip source code ZIP: ' + err.message });
   }
 });
 
-// Mount Vite or serve static
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -1025,17 +1352,19 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.resolve('dist')));
-    app.get('*', (_req: Request, res: Response) => {
-      res.sendFile(path.resolve('dist/index.html'));
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*all', (_req: Request, res: Response) => {
+      res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`iGlass WhatsApp Full-Stack Server running at http://0.0.0.0:${PORT}`);
+    console.log(`Server running on http://localhost:${PORT}`);
+    if (fs.existsSync(path.join(AUTH_DIR, 'creds.json'))) {
+      startWhatsApp();
+    }
   });
 }
 
-startServer().catch((err) => {
-  console.error('Server failed to start:', err);
-});
+startServer();

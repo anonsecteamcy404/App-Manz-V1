@@ -21,6 +21,9 @@ import {
   EyeOff,
   ShieldCheck,
   Trash2,
+  Sparkles,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { MediaAttachment } from '../types/whatsapp';
 import { triggerFileDownload } from '../utils/exporter';
@@ -42,6 +45,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
     reactToMessage,
     startCall,
     modConfig,
+    updateModConfig,
     boomStatus,
     startChatBoom,
     stopChatBoom,
@@ -53,22 +57,23 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [previewMedia, setPreviewMedia] = useState<MediaAttachment | null>(null);
+  const [manuallyUnlockedIds, setManuallyUnlockedIds] = useState<Set<string>>(new Set());
 
-  // Chat Boom Modal / Drawer State
-  const [showBoomModal, setShowBoomModal] = useState(false);
+  // Floating iOS Liquid Glass Chat Boom Widget State (per chat)
+  const [isFloatingBoomOpen, setIsFloatingBoomOpen] = useState(false);
   const [boomMessageText, setBoomMessageText] = useState('maafin aku');
   const [boomCount, setBoomCount] = useState<number>(5);
+  const [boomFeedback, setBoomFeedback] = useState<string | null>(null);
 
   // Audio playback
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
-  const [audioPlaybackRate, setAudioPlaybackRate] = useState<1 | 1.5 | 2>(1);
   const [audioProgress, setAudioProgress] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recordingTimerRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto scroll to bottom
+  // Auto scroll to bottom on new message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [activeChat?.messages.length, activeChat?.isTyping]);
@@ -85,12 +90,12 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
           setPlayingAudioId(null);
           return 0;
         }
-        return prev + 5 * audioPlaybackRate;
+        return prev + 5;
       });
     }, 200);
 
     return () => clearInterval(interval);
-  }, [playingAudioId, audioPlaybackRate]);
+  }, [playingAudioId]);
 
   const startRecording = () => {
     setIsRecordingVoice(true);
@@ -139,23 +144,47 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
     }
   };
 
-  const handleLaunchBoom = (e: React.FormEvent) => {
+  const handleLaunchBoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeChat || !boomMessageText.trim() || boomCount < 1) return;
-    startChatBoom(activeChat.id, boomMessageText.trim(), boomCount);
-    setShowBoomModal(false);
+    setBoomFeedback(null);
+    const result = await startChatBoom(activeChat.id, boomMessageText.trim(), boomCount);
+    if (!result.success) {
+      setBoomFeedback(result.error || 'Gagal menjalankan Boom');
+    } else {
+      setBoomFeedback(`Boom ${boomCount}x dimulai ke ${activeChat.name}!`);
+      setTimeout(() => setBoomFeedback(null), 3000);
+    }
+  };
+
+  const handleQuickToggleAntiBanInBoom = () => {
+    const nextEnabled = !modConfig.antiBanGuard.enabled;
+    updateModConfig({
+      antiBanGuard: {
+        ...modConfig.antiBanGuard,
+        enabled: nextEnabled,
+        humanTypingSimulation: nextEnabled,
+        adaptiveJitterDelay: nextEnabled,
+        invisibleZeroWidthVariation: nextEnabled,
+        autoWarmupNewContacts: nextEnabled,
+      },
+    });
   };
 
   const handleDownloadAttachment = async (att: MediaAttachment) => {
     try {
-      if (att.url && (att.url.startsWith('/api/media-file/') || att.url.startsWith('http') || att.url.startsWith('blob:'))) {
+      if (att.url) {
         const res = await fetch(att.url);
-        const blob = await res.blob();
-        triggerFileDownload(blob, att.fileName || `iGlass_Media_${Date.now()}`);
-      } else {
-        const blob = new Blob([`Media File: ${att.fileName}`], { type: att.mimeType || 'application/octet-stream' });
-        triggerFileDownload(blob, att.fileName || `iGlass_Media_${Date.now()}`);
+        if (res.ok) {
+          const blob = await res.blob();
+          triggerFileDownload(blob, att.fileName || `iGlass_Media_${Date.now()}`);
+          return;
+        }
       }
+      const blob = new Blob([`Media File: ${att.fileName}`], {
+        type: att.mimeType || 'application/octet-stream',
+      });
+      triggerFileDownload(blob, att.fileName || `iGlass_Media_${Date.now()}`);
     } catch (err) {
       console.error('Download media error:', err);
     }
@@ -176,7 +205,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
       fileSize: `${Math.max(1, Math.round(file.size / 1024))} KB`,
       mimeType: file.type || 'application/octet-stream',
     };
-    sendMessage(activeChat.id, file.name, [att]);
+    sendMessage(activeChat.id, file.name, [att], file);
     setShowAttachmentMenu(false);
     e.target.value = '';
   };
@@ -184,14 +213,14 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
   if (!activeChat) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 text-center ios-glass-subtle">
-        <div className="w-16 h-16 rounded-3xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 mb-4">
-          <ShieldCheck className="w-8 h-8" />
+        <div className="w-20 h-20 rounded-3xl ios-glass-card flex items-center justify-center text-emerald-400 mb-5 shadow-2xl animate-liquid-orb">
+          <Sparkles className="w-9 h-9" />
         </div>
-        <h3 className="text-lg font-bold text-slate-800 dark:text-white">
-          WhatsApp iGlass Mod Pro Siap Digunakan
+        <h3 className="text-xl font-extrabold text-slate-800 dark:text-white tracking-tight">
+          WhatsApp iGlass Liquid Pro
         </h3>
-        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mt-1 leading-relaxed">
-          Pilih salah satu obrolan di sebelah kiri atau klik <strong>Nomor Baru</strong> untuk mengirim pesan ke nomor yang belum disimpan dengan fitur <strong>Anti-Centang Biru</strong>, <strong>Pembuka 1x Lihat</strong>, dan <strong>Chat Boom Anti-Ban</strong>.
+        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mt-2 leading-relaxed">
+          Pilih salah satu obrolan di sebelah kiri atau klik <strong>Nomor Baru</strong>. Semua fitur Mod awal dalam kondisi <strong>OFF</strong> — Anda dapat menyalakannya sendiri kapan saja di tab <strong>Mod & Anti-Ban</strong> atau lewat tombol <strong>Floating Boom</strong> di setiap ruang chat.
         </p>
       </div>
     );
@@ -200,7 +229,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
   const commonEmojis = ['👍', '❤️', '😂', '🔥', '🙏', '🎉', '🚀', '👏', '😍', '✨'];
 
   return (
-    <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-slate-50/50 dark:bg-slate-950/50">
+    <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-slate-50/30 dark:bg-slate-950/30">
       {/* Hidden real file picker */}
       <input
         ref={fileInputRef}
@@ -209,17 +238,18 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
         onChange={handleFileUpload}
       />
 
-      {/* Dynamic wallpaper subtle mesh */}
-      <div className="absolute inset-0 bg-radial from-emerald-500/5 via-transparent to-transparent pointer-events-none" />
+      {/* Ambient Liquid Glass Light Orbs inside Chat */}
+      <div className="absolute -top-24 right-1/4 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none animate-liquid-orb" />
+      <div className="absolute bottom-20 left-1/4 w-80 h-80 bg-teal-500/10 rounded-full blur-3xl pointer-events-none animate-liquid-orb-slow" />
 
       {/* Chat Top Header */}
-      <div className="sticky top-0 z-20 px-4 py-3 ios-glass-header flex items-center justify-between gap-3 shadow-xs">
+      <div className="sticky top-0 z-20 px-4 py-3 ios-glass-header flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           {onBackMobile && (
             <button
               type="button"
               onClick={onBackMobile}
-              className="md:hidden p-1.5 -ml-1 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300"
+              className="md:hidden p-1.5 -ml-1 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 ios-liquid-btn"
               aria-label="Kembali ke daftar obrolan"
             >
               <ChevronLeft className="w-5 h-5" />
@@ -230,26 +260,31 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
             <img
               src={activeChat.avatar}
               alt={activeChat.name}
-              className="w-10 h-10 rounded-2xl object-cover border border-white/20 shadow-sm"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="%2310b981"/><text x="50" y="58" font-size="32" font-weight="bold" fill="white" font-family="sans-serif" text-anchor="middle">${encodeURIComponent(
+                  activeChat.name.slice(0, 2).toUpperCase()
+                )}</text></svg>`;
+              }}
+              className="w-11 h-11 rounded-2xl object-cover border border-white/40 shadow-md"
             />
             {!activeChat.isGroup && (
-              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white dark:border-slate-900" />
+              <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-white dark:border-slate-900 shadow-xs" />
             )}
           </div>
 
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+              <h2 className="text-sm font-extrabold text-slate-900 dark:text-white truncate">
                 {activeChat.name}
               </h2>
               {modConfig.antiBlueTick && (
                 <span
                   onClick={onOpenModSettings}
-                  className="cursor-pointer px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-400 border border-sky-500/30 text-[10px] font-bold flex items-center gap-1 shrink-0"
-                  title="Anti Centang Biru Aktif"
+                  className="cursor-pointer px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 border border-sky-400/30 text-[10px] font-bold flex items-center gap-1 shrink-0"
+                  title="Stealth Anti Centang Biru Aktif"
                 >
                   <EyeOff className="w-2.5 h-2.5" />
-                  <span className="hidden sm:inline">Anti Centang Biru</span>
+                  <span className="hidden sm:inline">Stealth Biru ON</span>
                 </span>
               )}
             </div>
@@ -257,9 +292,9 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
               {activeChat.isTyping ? (
                 <span className="text-emerald-500 font-semibold animate-pulse">sedang mengetik...</span>
               ) : activeChat.isGroup ? (
-                `Grup WhatsApp`
+                `Grup WhatsApp Multi-Device`
               ) : (
-                'Terhubung · Anti-Ban Handshake Aktif'
+                `+${activeChat.id.split('@')[0]}`
               )}
             </p>
           </div>
@@ -267,21 +302,10 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
 
         {/* Top actions */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {/* Chat Boom Trigger Button */}
-          <button
-            type="button"
-            onClick={() => setShowBoomModal(!showBoomModal)}
-            className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 text-amber-500 hover:bg-amber-500/25 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs"
-            title="Kirim Pesan Berulang Otomatis (Chat Boom Anti-Ban)"
-          >
-            <Zap className="w-3.5 h-3.5 fill-current" />
-            <span>Chat Boom</span>
-          </button>
-
           <button
             type="button"
             onClick={() => startCall(activeChat.id, 'audio')}
-            className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors"
+            className="p-2 rounded-xl ios-glass-subtle hover:bg-white/20 text-slate-700 dark:text-slate-200 ios-liquid-btn"
             title="Panggilan Suara"
             aria-label="Panggilan suara"
           >
@@ -291,7 +315,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
           <button
             type="button"
             onClick={() => startCall(activeChat.id, 'video')}
-            className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors"
+            className="p-2 rounded-xl ios-glass-subtle hover:bg-white/20 text-slate-700 dark:text-slate-200 ios-liquid-btn"
             title="Panggilan Video"
             aria-label="Panggilan video"
           >
@@ -301,7 +325,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
           <button
             type="button"
             onClick={onExportCurrentChat}
-            className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/20 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-500/30 border border-emerald-400/30 text-xs font-bold flex items-center gap-1.5 ios-liquid-btn"
             title="Ekspor obrolan ini"
           >
             <Download className="w-3.5 h-3.5" />
@@ -310,220 +334,323 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
         </div>
       </div>
 
-      {/* Live Chat Boom Progress Bar Banner */}
-      {boomStatus.isRunning && (
-        <div className="px-4 py-2.5 bg-amber-500/20 border-b border-amber-500/30 backdrop-blur-md flex items-center justify-between gap-3 z-20">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <Zap className="w-4 h-4 text-amber-400 animate-bounce shrink-0" />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between text-xs font-bold text-amber-300 mb-1">
-                <span className="truncate">
-                  Mengirim Boom: "{boomStatus.text}" ({boomStatus.sent}/{boomStatus.total})
-                </span>
-                <span className="font-mono ml-2">
-                  {Math.round((boomStatus.sent / Math.max(1, boomStatus.total)) * 100)}%
-                </span>
+      {/* =====================================================================
+          FLOATING iOS LIQUID GLASS CHAT BOOM WIDGET (ALWAYS AVAILABLE IN CHAT)
+         ===================================================================== */}
+      <div className="absolute right-4 bottom-20 z-30 flex flex-col items-end">
+        {isFloatingBoomOpen ? (
+          <div className="w-80 sm:w-96 p-4 rounded-3xl ios-liquid-capsule text-white animate-spring-pop space-y-3.5">
+            {/* Floating Header */}
+            <div className="flex items-center justify-between gap-2 pb-2 border-b border-white/15">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-slate-950 flex items-center justify-center shadow-lg shadow-amber-500/30 shrink-0">
+                  <Zap className="w-5 h-5 fill-current" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-xs font-extrabold tracking-tight text-white flex items-center gap-1.5">
+                    <span>Floating Chat Boom</span>
+                    <span className="px-1.5 py-0.5 rounded-md bg-white/15 text-[10px] font-mono text-amber-300">
+                      iGlass
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-emerald-200/80 truncate">
+                    Target: <strong>{activeChat.name}</strong>
+                  </p>
+                </div>
               </div>
-              <div className="w-full h-1.5 rounded-full bg-black/30 overflow-hidden">
-                <div
-                  className="h-full bg-amber-400 transition-all duration-300"
-                  style={{
-                    width: `${Math.min(100, (boomStatus.sent / Math.max(1, boomStatus.total)) * 100)}%`,
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={stopChatBoom}
-            className="px-3 py-1 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold shrink-0"
-          >
-            Stop
-          </button>
-        </div>
-      )}
 
-      {/* Chat Boom Modal / Popover */}
-      {showBoomModal && (
-        <div className="mx-4 mt-3 p-4 rounded-3xl ios-glass-card border border-amber-500/40 shadow-2xl z-30 space-y-3 animate-in fade-in slide-in-from-top-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
-                <Zap className="w-4 h-4 fill-current" />
-              </div>
-              <div>
-                <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
-                  Chat Boom Otomatis (Anti-Ban & Anti-Spam)
-                </h3>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Kirim pesan berulang kali ke <strong>{activeChat.name}</strong> dengan jeda manusia & zero-width hash
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={() => setIsFloatingBoomOpen(false)}
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white/80 hover:text-white ios-liquid-btn"
+                title="Perkecil Floating Boom"
+              >
+                <ChevronDown className="w-4 h-4" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowBoomModal(false)}
-              className="p-1 rounded-lg hover:bg-white/10 text-slate-400"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
 
-          <form onSubmit={handleLaunchBoom} className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-              <div className="sm:col-span-8 space-y-1">
-                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
-                  Isi Pesan Boom (Contoh: "maafin aku")
+            {/* Active Boom Progress inside Floating Capsule */}
+            {boomStatus.isRunning && (
+              <div className="p-3 rounded-2xl bg-amber-500/20 border border-amber-400/40 space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-amber-200">
+                  <span className="truncate">
+                    Mengirim: {boomStatus.sent} / {boomStatus.total}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={stopChatBoom}
+                    className="px-2.5 py-1 rounded-lg bg-rose-500 hover:bg-rose-600 text-white text-[11px] font-extrabold shadow-sm ios-liquid-btn"
+                  >
+                    Hentikan
+                  </button>
+                </div>
+                <div className="w-full h-2 rounded-full bg-black/40 overflow-hidden p-0.5">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-amber-400 to-emerald-400 transition-all duration-300"
+                    style={{
+                      width: `${Math.min(100, (boomStatus.sent / Math.max(1, boomStatus.total)) * 100)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Boom Form */}
+            <form onSubmit={handleLaunchBoom} className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-200 flex items-center justify-between">
+                  <span>Pesan yang Ingin Di-Boom</span>
+                  <span className="text-[10px] text-emerald-300">Otomatis Kirim Beruntun</span>
                 </label>
                 <input
                   type="text"
                   value={boomMessageText}
                   onChange={(e) => setBoomMessageText(e.target.value)}
-                  placeholder="Masukkan teks pesan yang ingin di-boom..."
-                  className="w-full px-3.5 py-2 rounded-xl bg-black/10 dark:bg-white/10 border border-black/10 dark:border-white/15 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  placeholder="Contoh: maafin aku"
+                  className="w-full px-3.5 py-2 rounded-2xl bg-white/10 border border-white/20 text-xs text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-amber-400"
                 />
               </div>
 
-              <div className="sm:col-span-4 space-y-1">
-                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
-                  Jumlah Kirim (1 - 100x)
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={boomCount}
-                  onChange={(e) => setBoomCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
-                  className="w-full px-3.5 py-2 rounded-xl bg-black/10 dark:bg-white/10 border border-black/10 dark:border-white/15 text-xs font-mono font-bold text-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400"
-                />
-              </div>
-            </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-slate-200">
+                    Jumlah Kirim (1 – 100x)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={boomCount}
+                    onChange={(e) =>
+                      setBoomCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))
+                    }
+                    className="w-20 px-2.5 py-1 rounded-xl bg-white/15 border border-white/25 text-center font-mono text-xs font-extrabold text-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                </div>
 
-            {/* Quick Preset Counts */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] text-slate-400">Pilih Cepat:</span>
-                {[3, 5, 10, 20, 50].map((cnt) => (
-                  <button
-                    key={cnt}
-                    type="button"
-                    onClick={() => setBoomCount(cnt)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
-                      boomCount === cnt
-                        ? 'bg-amber-500 text-slate-950'
-                        : 'bg-black/10 dark:bg-white/10 text-slate-300 hover:bg-white/20'
+                {/* Preset Pills */}
+                <div className="flex items-center gap-1.5">
+                  {[3, 5, 10, 25, 50].map((cnt) => (
+                    <button
+                      key={cnt}
+                      type="button"
+                      onClick={() => setBoomCount(cnt)}
+                      className={`flex-1 py-1.5 rounded-xl text-xs font-extrabold transition-all ios-liquid-btn ${
+                        boomCount === cnt
+                          ? 'bg-gradient-to-r from-amber-400 to-orange-400 text-slate-950 shadow-md'
+                          : 'bg-white/10 text-white/80 hover:bg-white/20'
+                      }`}
+                    >
+                      {cnt}x
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Direct Anti-Ban Toggle inside Floating Boom */}
+              <div className="p-2.5 rounded-2xl bg-white/10 border border-white/15 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <ShieldCheck
+                    className={`w-4 h-4 shrink-0 ${
+                      modConfig.antiBanGuard.enabled ? 'text-emerald-400' : 'text-slate-400'
                     }`}
-                  >
-                    {cnt}x
-                  </button>
-                ))}
+                  />
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold text-white truncate">
+                      Proteksi Anti-Ban & Anti-Spam
+                    </p>
+                    <p className="text-[10px] text-white/65 truncate">
+                      {modConfig.antiBanGuard.enabled
+                        ? 'Aktif (Jeda Acak + Zero-Width Hash)'
+                        : 'Nonaktif (Kirim Cepat Instan)'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleQuickToggleAntiBanInBoom}
+                  className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 ${
+                    modConfig.antiBanGuard.enabled ? 'bg-emerald-500' : 'bg-white/20'
+                  }`}
+                >
+                  <div
+                    className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${
+                      modConfig.antiBanGuard.enabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
               </div>
+
+              {boomFeedback && (
+                <p className="text-[11px] font-bold text-amber-300 text-center">{boomFeedback}</p>
+              )}
 
               <button
                 type="submit"
-                className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold text-xs shadow-lg shadow-amber-500/20 flex items-center gap-1.5"
+                disabled={boomStatus.isRunning}
+                className="w-full py-2.5 rounded-2xl bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500 hover:from-amber-300 hover:to-orange-400 disabled:opacity-50 text-slate-950 font-extrabold text-xs shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2 ios-liquid-btn"
               >
-                <Zap className="w-3.5 h-3.5 fill-current" />
-                <span>Kirim {boomCount} Pesan Sekarang</span>
+                <Zap className="w-4 h-4 fill-current" />
+                <span>
+                  {boomStatus.isRunning
+                    ? `Sedang Mengirim (${boomStatus.sent}/${boomStatus.total})...`
+                    : `Kirim "${boomMessageText.slice(0, 14)}" (${boomCount}x)`}
+                </span>
               </button>
+            </form>
+          </div>
+        ) : (
+          /* Floating Collapsed Liquid Glass Pill */
+          <button
+            type="button"
+            onClick={() => setIsFloatingBoomOpen(true)}
+            className="px-4 py-2.5 rounded-full ios-liquid-capsule text-white flex items-center gap-2.5 shadow-2xl ios-liquid-btn group"
+            title="Buka Floating Chat Boom untuk kontak ini"
+          >
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-slate-950 flex items-center justify-center shadow-md group-hover:scale-110 transition-transform">
+              <Zap className="w-4 h-4 fill-current" />
             </div>
-
-            <div className="text-[10px] text-emerald-400 flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-              <span>
-                Dilindungi Anti-Ban: Simulasi mengetik + jeda acak {modConfig.antiBanGuard.minDelayMs}–{modConfig.antiBanGuard.maxDelayMs}ms agar akun WA aman dari blokir spam.
+            <div className="text-left pr-1">
+              <span className="text-xs font-extrabold block leading-none tracking-tight">
+                {boomStatus.isRunning
+                  ? `Boom: ${boomStatus.sent}/${boomStatus.total}`
+                  : 'Chat Boom'}
+              </span>
+              <span className="text-[10px] text-emerald-300 font-medium block mt-0.5">
+                {boomStatus.isRunning ? 'Sedang mengirim...' : `Atur & Boom ke ${activeChat.name.split(' ')[0]}`}
               </span>
             </div>
-          </form>
-        </div>
-      )}
+            <ChevronUp className="w-4 h-4 text-white/70" />
+          </button>
+        )}
+      </div>
 
       {/* Messages Thread Container */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
-        {/* Stealth & E2EE info banner */}
-        <div className="flex flex-wrap justify-center gap-2 my-2">
-          <div className="px-3.5 py-1.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-700 dark:text-emerald-300 text-center flex items-center gap-1.5 shadow-xs">
-            <ShieldCheck className="w-3.5 h-3.5" />
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3.5 pb-24">
+        {/* Top Liquid Status Pill */}
+        <div className="flex flex-wrap justify-center gap-2 my-1">
+          <button
+            type="button"
+            onClick={onOpenModSettings}
+            className="px-4 py-1.5 rounded-full ios-glass-subtle text-[11px] text-slate-700 dark:text-slate-200 text-center flex items-center gap-2 shadow-xs hover:border-emerald-400/50 ios-liquid-btn"
+          >
+            <ShieldCheck
+              className={`w-3.5 h-3.5 ${
+                modConfig.antiBlueTick || modConfig.antiViewOnce
+                  ? 'text-emerald-400'
+                  : 'text-slate-400'
+              }`}
+            />
             <span>
-              Mode Mod Aktif: {modConfig.antiBlueTick ? 'Anti-Centang Biru (Buka & Balas)' : 'Standar'} · Pembuka 1x Lihat Otomatis
+              Status Mod:{' '}
+              <strong>
+                {modConfig.antiBlueTick ||
+                modConfig.antiBlueTickOnReply ||
+                modConfig.antiViewOnce ||
+                modConfig.antiRevokeMessage
+                  ? 'Aktif (Kustom)'
+                  : 'Semua OFF (Klik untuk menyalakan)'}
+              </strong>
             </span>
-          </div>
+          </button>
         </div>
 
         {activeChat.messages.map((msg) => {
           const isOut = msg.isOutgoing;
+          const isViewOnceUnlocked =
+            !msg.isViewOnce || modConfig.antiViewOnce || manuallyUnlockedIds.has(msg.id);
+
           return (
             <div
               key={msg.id}
-              className={`flex flex-col group ${isOut ? 'items-end' : 'items-start'} transition-all`}
+              className={`flex flex-col group ${isOut ? 'items-end' : 'items-start'} animate-spring-pop`}
             >
               <div
-                className={`relative max-w-[85%] md:max-w-[70%] p-3.5 rounded-2xl shadow-sm transition-all ${
+                className={`relative max-w-[85%] md:max-w-[68%] p-3.5 rounded-3xl transition-all ${
                   isOut
-                    ? 'bg-gradient-to-br from-emerald-600 to-teal-600 text-white rounded-tr-xs'
-                    : 'ios-glass-card text-slate-900 dark:text-white rounded-tl-xs'
+                    ? 'ios-liquid-bubble-out text-white rounded-br-md'
+                    : 'ios-liquid-bubble-in text-slate-900 dark:text-white rounded-bl-md'
                 }`}
               >
                 {/* Group sender name */}
                 {!isOut && activeChat.isGroup && (
-                  <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 mb-1">
+                  <div className="text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400 mb-1">
                     {msg.senderName}
                   </div>
                 )}
 
-                {/* View Once Unlocked Badge */}
+                {/* View Once Header / Manual Unlocker if Mod is currently OFF */}
                 {msg.isViewOnce && (
-                  <div className="mb-2 px-2.5 py-1 rounded-xl bg-amber-500/20 border border-amber-400/40 text-amber-300 text-[11px] font-bold flex items-center justify-between gap-2">
+                  <div className="mb-2 px-3 py-1.5 rounded-2xl bg-amber-500/20 border border-amber-400/40 text-amber-700 dark:text-amber-300 text-[11px] font-bold flex items-center justify-between gap-3">
                     <span className="flex items-center gap-1.5">
                       <LockOpen className="w-3.5 h-3.5" />
-                      <span>Media 1x Lihat Terbuka (Anti View-Once)</span>
+                      <span>
+                        {isViewOnceUnlocked
+                          ? 'Media 1x Lihat Terbuka'
+                          : 'Pesan Sekali Lihat (1x Lihat)'}
+                      </span>
                     </span>
+                    {!isViewOnceUnlocked && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setManuallyUnlockedIds((prev) => new Set(prev).add(msg.id))
+                        }
+                        className="px-2.5 py-0.5 rounded-lg bg-amber-500 text-slate-950 text-[10px] font-extrabold ios-liquid-btn"
+                      >
+                        Buka Paksa
+                      </button>
+                    )}
                   </div>
                 )}
 
                 {/* Anti-Revoke Badge if sender deleted message */}
                 {msg.isRevoked && (
-                  <div className="mb-2 px-2.5 py-1 rounded-xl bg-rose-500/20 border border-rose-400/40 text-rose-300 text-[11px] font-bold flex items-center gap-1.5">
+                  <div className="mb-2 px-2.5 py-1 rounded-xl bg-rose-500/20 border border-rose-400/40 text-rose-600 dark:text-rose-300 text-[11px] font-bold flex items-center gap-1.5">
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Pesan Dihapus Pengirim (Diselamatkan Anti-Revoke)</span>
+                    <span>
+                      {modConfig.antiRevokeMessage
+                        ? 'Pesan Dihapus Pengirim (Diselamatkan Anti-Revoke)'
+                        : 'Pesan Dihapus'}
+                    </span>
                   </div>
                 )}
 
                 {/* Media Attachments */}
-                {msg.attachments && msg.attachments.length > 0 && (
+                {msg.attachments && msg.attachments.length > 0 && isViewOnceUnlocked && (
                   <div className="space-y-2 mb-2">
                     {msg.attachments.map((att) => {
                       if (att.type === 'image') {
                         return (
                           <div
                             key={att.id}
-                            className="relative rounded-xl overflow-hidden group/media border border-black/10 dark:border-white/10"
+                            className="relative rounded-2xl overflow-hidden group/media border border-white/20"
                           >
                             <img
                               src={att.url}
                               alt={att.fileName}
                               onClick={() => setPreviewMedia(att)}
-                              className="w-full max-h-72 object-cover rounded-xl cursor-pointer transition-transform group-hover/media:scale-102"
+                              className="w-full max-h-72 object-cover rounded-2xl cursor-pointer transition-transform duration-300 group-hover/media:scale-102"
                             />
                             <div className="absolute top-2 right-2 flex items-center gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => setPreviewMedia(att)}
-                                className="px-2.5 py-1 rounded-lg bg-black/70 hover:bg-black/90 text-white text-[11px] font-semibold flex items-center gap-1 backdrop-blur-xs"
+                                className="px-2.5 py-1 rounded-xl bg-black/65 hover:bg-black/85 text-white text-[11px] font-semibold flex items-center gap-1 backdrop-blur-md ios-liquid-btn"
                               >
-                                <Eye className="w-3 h-3" /> Perbesar
+                                <Eye className="w-3 h-3" /> Lihat
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleDownloadAttachment(att)}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold flex items-center gap-1 shadow-md"
+                                className="px-2.5 py-1 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold flex items-center gap-1 shadow-md ios-liquid-btn"
                               >
                                 <Download className="w-3 h-3" /> Unduh
                               </button>
                             </div>
-                            <span className="absolute bottom-2 right-2 text-[10px] bg-black/60 text-white px-2 py-0.5 rounded-full font-mono">
-                              {att.isViewOnce ? '1x Lihat · ' : ''}{att.fileSize}
+                            <span className="absolute bottom-2 right-2 text-[10px] bg-black/60 text-white px-2 py-0.5 rounded-full font-mono backdrop-blur-xs">
+                              {att.isViewOnce ? '1x Lihat · ' : ''}
+                              {att.fileSize}
                             </span>
                           </div>
                         );
@@ -533,21 +660,22 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
                         return (
                           <div
                             key={att.id}
-                            className="relative rounded-xl overflow-hidden border border-black/10 dark:border-white/10 bg-black/40 p-2 space-y-2"
+                            className="relative rounded-2xl overflow-hidden border border-white/20 bg-black/40 p-2 space-y-2"
                           >
                             <video
                               src={att.url}
                               controls
-                              className="w-full max-h-72 rounded-lg"
+                              className="w-full max-h-72 rounded-xl"
                             />
                             <div className="flex items-center justify-between px-1">
-                              <span className="text-[10px] opacity-80 truncate">
-                                {att.isViewOnce ? '🔓 Video 1x Lihat · ' : ''}{att.fileName} ({att.fileSize})
+                              <span className="text-[10px] opacity-85 truncate">
+                                {att.isViewOnce ? '🔓 Video 1x Lihat · ' : ''}
+                                {att.fileName} ({att.fileSize})
                               </span>
                               <button
                                 type="button"
                                 onClick={() => handleDownloadAttachment(att)}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold flex items-center gap-1"
+                                className="px-2.5 py-1 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold flex items-center gap-1 ios-liquid-btn"
                               >
                                 <Download className="w-3 h-3" /> Unduh Video
                               </button>
@@ -561,38 +689,36 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
                         return (
                           <div
                             key={att.id}
-                            className={`p-3 rounded-xl flex items-center gap-3 border ${
+                            className={`p-3 rounded-2xl flex items-center gap-3 border ${
                               isOut
-                                ? 'bg-black/15 border-white/20'
+                                ? 'bg-black/15 border-white/25'
                                 : 'bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/10'
                             }`}
                           >
                             <button
                               type="button"
-                              onClick={() => {
-                                if (isPlaying) {
-                                  setPlayingAudioId(null);
-                                } else {
-                                  setPlayingAudioId(att.id);
-                                }
-                              }}
-                              className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-transform active:scale-95 ${
+                              onClick={() => setPlayingAudioId(isPlaying ? null : att.id)}
+                              className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ios-liquid-btn ${
                                 isOut
                                   ? 'bg-white text-emerald-700'
                                   : 'bg-emerald-500 text-white'
                               }`}
                             >
-                              {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+                              {isPlaying ? (
+                                <Pause className="w-4 h-4 fill-current" />
+                              ) : (
+                                <Play className="w-4 h-4 fill-current ml-0.5" />
+                              )}
                             </button>
 
                             <div className="flex-1 space-y-1">
-                              {att.url && att.url.startsWith('/api/media-file/') ? (
+                              {att.url ? (
                                 <audio src={att.url} controls className="w-full h-8" />
                               ) : (
                                 <div className="relative h-6 flex items-center gap-1">
-                                  {[30, 60, 45, 90, 75, 40, 85, 95, 60, 40, 70, 80, 50, 65, 85, 45, 30, 70, 90, 50].map(
+                                  {[30, 60, 45, 90, 75, 40, 85, 95, 60, 40, 70, 80, 50, 65, 85, 45].map(
                                     (height, i) => {
-                                      const percentDone = (i / 20) * 100;
+                                      const percentDone = (i / 16) * 100;
                                       const barActive = isPlaying && audioProgress >= percentDone;
                                       return (
                                         <div
@@ -622,7 +748,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
                             <button
                               type="button"
                               onClick={() => handleDownloadAttachment(att)}
-                              className="p-1.5 rounded-lg bg-black/20 hover:bg-black/30"
+                              className="p-1.5 rounded-xl bg-black/20 hover:bg-black/30 ios-liquid-btn"
                               title="Unduh Audio"
                             >
                               <Download className="w-3.5 h-3.5" />
@@ -635,13 +761,13 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
                         return (
                           <div
                             key={att.id}
-                            className={`p-3 rounded-xl flex items-center gap-3 border ${
+                            className={`p-3 rounded-2xl flex items-center gap-3 border ${
                               isOut
-                                ? 'bg-black/15 border-white/20'
+                                ? 'bg-black/15 border-white/25'
                                 : 'bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/10'
                             }`}
                           >
-                            <div className="w-10 h-10 rounded-xl bg-red-500/20 text-red-500 flex items-center justify-center shrink-0">
+                            <div className="w-10 h-10 rounded-xl bg-red-500/20 text-red-400 flex items-center justify-center shrink-0">
                               <FileText className="w-5 h-5" />
                             </div>
                             <div className="flex-1 min-w-0">
@@ -651,7 +777,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
                             <button
                               type="button"
                               onClick={() => handleDownloadAttachment(att)}
-                              className="p-2 rounded-lg hover:bg-black/10 dark:hover:bg-white/10"
+                              className="p-2 rounded-xl hover:bg-black/10 dark:hover:bg-white/10 ios-liquid-btn"
                               title="Unduh dokumen"
                             >
                               <Download className="w-4 h-4" />
@@ -675,14 +801,14 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
                 {/* Timestamp & Read Receipt */}
                 <div
                   className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${
-                    isOut ? 'text-white/80' : 'text-slate-500 dark:text-slate-400'
+                    isOut ? 'text-white/85' : 'text-slate-500 dark:text-slate-400'
                   }`}
                 >
                   <span className="tabular-nums">{msg.timestamp}</span>
                   {isOut && (
                     <CheckCheck
                       className={`w-3.5 h-3.5 ${
-                        msg.status === 'read' ? 'text-sky-300' : 'text-white/60'
+                        msg.status === 'read' ? 'text-sky-200' : 'text-white/65'
                       }`}
                     />
                   )}
@@ -690,11 +816,15 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
 
                 {/* Message Reactions */}
                 {msg.reactions && msg.reactions.length > 0 && (
-                  <div className="absolute -bottom-2 right-2 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-white dark:bg-slate-800 shadow-md border border-black/5 dark:border-white/10 text-xs">
+                  <div className="absolute -bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-full ios-glass-card shadow-md text-xs">
                     {msg.reactions.map((r, idx) => (
                       <span key={idx} className="flex items-center gap-0.5">
                         <span>{r.emoji}</span>
-                        {r.count > 1 && <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">{r.count}</span>}
+                        {r.count > 1 && (
+                          <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
+                            {r.count}
+                          </span>
+                        )}
                       </span>
                     ))}
                   </div>
@@ -702,7 +832,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
               </div>
 
               {/* Quick reaction hover palette */}
-              <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full ios-glass-card shadow-xs transition-opacity">
+              <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 mt-1 px-2.5 py-0.5 rounded-full ios-glass-subtle shadow-xs transition-opacity">
                 {['👍', '❤️', '😂', '🔥'].map((emoji) => (
                   <button
                     key={emoji}
@@ -724,16 +854,19 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
       {/* Floating Lightbox Preview for Media */}
       {previewMedia && (
         <div
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex flex-col items-center justify-center p-4"
           onClick={() => setPreviewMedia(null)}
         >
-          <div className="relative max-w-3xl w-full p-4 ios-glass-card rounded-3xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-3">
+          <div
+            className="relative max-w-3xl w-full p-5 ios-glass-card rounded-3xl animate-spring-pop"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-white/15 mb-3">
               <div>
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <span>{previewMedia.fileName}</span>
                   {previewMedia.isViewOnce && (
-                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px]">
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 text-[10px]">
                       🔓 1x Lihat Terbuka
                     </span>
                   )}
@@ -744,7 +877,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
                 <button
                   type="button"
                   onClick={() => handleDownloadAttachment(previewMedia)}
-                  className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5"
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 ios-liquid-btn"
                 >
                   <Download className="w-4 h-4" />
                   <span>Unduh ke Perangkat</span>
@@ -752,7 +885,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
                 <button
                   type="button"
                   onClick={() => setPreviewMedia(null)}
-                  className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white"
+                  className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-slate-700 dark:text-white ios-liquid-btn"
                   aria-label="Tutup pratinjau"
                 >
                   <X className="w-5 h-5" />
@@ -779,29 +912,29 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
 
       {/* Quick Attachment Sheet Drawer */}
       {showAttachmentMenu && (
-        <div className="p-3 mx-4 mb-2 rounded-2xl ios-glass-card border border-white/20 grid grid-cols-2 sm:grid-cols-3 gap-2 animate-in fade-in slide-in-from-bottom-2">
+        <div className="p-3 mx-4 mb-2 rounded-3xl ios-glass-card grid grid-cols-2 sm:grid-cols-3 gap-2 animate-spring-pop z-20">
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="p-3 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-2.5 text-xs font-semibold text-slate-800 dark:text-slate-100"
+            className="p-3 rounded-2xl hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-2.5 text-xs font-semibold text-slate-800 dark:text-slate-100 ios-liquid-btn"
           >
-            <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-500 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
               <ImageIcon className="w-4 h-4" />
             </div>
-            <span>Unggah Foto/Video/Berkas</span>
+            <span>Kirim Foto/Video/Berkas</span>
           </button>
           <button
             type="button"
             onClick={() => {
               setShowAttachmentMenu(false);
-              setShowBoomModal(true);
+              setIsFloatingBoomOpen(true);
             }}
-            className="p-3 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-2.5 text-xs font-semibold text-slate-800 dark:text-slate-100"
+            className="p-3 rounded-2xl hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-2.5 text-xs font-semibold text-slate-800 dark:text-slate-100 ios-liquid-btn"
           >
-            <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-500 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
               <Zap className="w-4 h-4" />
             </div>
-            <span>Chat Boom Otomatis</span>
+            <span>Floating Chat Boom</span>
           </button>
           <button
             type="button"
@@ -821,9 +954,9 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
               }
               setShowAttachmentMenu(false);
             }}
-            className="p-3 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-2.5 text-xs font-semibold text-slate-800 dark:text-slate-100"
+            className="p-3 rounded-2xl hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-2.5 text-xs font-semibold text-slate-800 dark:text-slate-100 ios-liquid-btn"
           >
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-500 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
               <span>📍</span>
             </div>
             <span>Bagikan Lokasi GPS</span>
@@ -833,14 +966,12 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
 
       {/* Emoji Drawer */}
       {showEmojiPicker && (
-        <div className="p-3 mx-4 mb-2 rounded-2xl ios-glass-card border border-white/20 flex items-center gap-2 overflow-x-auto">
+        <div className="p-3 mx-4 mb-2 rounded-3xl ios-glass-card flex items-center gap-2 overflow-x-auto animate-spring-pop z-20">
           {commonEmojis.map((emoji) => (
             <button
               key={emoji}
               type="button"
-              onClick={() => {
-                setInputText((prev) => prev + emoji);
-              }}
+              onClick={() => setInputText((prev) => prev + emoji)}
               className="text-xl p-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 hover:scale-125 transition-transform"
             >
               {emoji}
@@ -850,12 +981,12 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
       )}
 
       {/* Message Composer Bar */}
-      <div className="p-3 md:p-4 ios-glass-header border-t border-black/5 dark:border-white/10">
+      <div className="p-3 md:p-4 ios-glass-header border-t border-white/20 z-20">
         {isRecordingVoice ? (
-          <div className="flex items-center justify-between gap-4 p-2 rounded-2xl bg-rose-500/10 border border-rose-500/20 animate-pulse">
+          <div className="flex items-center justify-between gap-4 p-2.5 rounded-2xl bg-rose-500/15 border border-rose-500/30 animate-pulse">
             <div className="flex items-center gap-3">
               <span className="w-3 h-3 rounded-full bg-rose-500" />
-              <span className="text-xs font-semibold text-rose-600 dark:text-rose-400">
+              <span className="text-xs font-bold text-rose-600 dark:text-rose-300">
                 Merekam Voice Note (0:{recordingSeconds < 10 ? '0' + recordingSeconds : recordingSeconds})
               </span>
             </div>
@@ -863,14 +994,14 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
               <button
                 type="button"
                 onClick={cancelRecording}
-                className="px-3 py-1.5 rounded-xl bg-black/10 dark:bg-white/10 hover:bg-black/20 text-xs font-medium text-slate-700 dark:text-slate-300"
+                className="px-3 py-1.5 rounded-xl bg-black/10 dark:bg-white/10 hover:bg-black/20 text-xs font-medium text-slate-700 dark:text-slate-300 ios-liquid-btn"
               >
                 Batal
               </button>
               <button
                 type="button"
                 onClick={finishRecording}
-                className="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-md"
+                className="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-md ios-liquid-btn"
               >
                 <Send className="w-3.5 h-3.5" />
                 <span>Kirim</span>
@@ -882,7 +1013,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
             <button
               type="button"
               onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 transition-colors"
+              className="p-2.5 rounded-2xl ios-glass-subtle hover:bg-white/20 text-slate-600 dark:text-slate-300 ios-liquid-btn"
               title="Pilih emoji"
               aria-label="Pilih emoji"
             >
@@ -892,21 +1023,11 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
             <button
               type="button"
               onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}
-              className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 transition-colors"
+              className="p-2.5 rounded-2xl ios-glass-subtle hover:bg-white/20 text-slate-600 dark:text-slate-300 ios-liquid-btn"
               title="Lampirkan berkas"
               aria-label="Lampirkan berkas"
             >
               <Paperclip className="w-5 h-5" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setShowBoomModal(!showBoomModal)}
-              className="p-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 transition-colors"
-              title="Buka Chat Boom (Kirim Pesan Berulang)"
-              aria-label="Chat Boom"
-            >
-              <Zap className="w-5 h-5" />
             </button>
 
             <div className="flex-1 relative">
@@ -917,10 +1038,10 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
                 onKeyDown={handleKeyDown}
                 placeholder={
                   modConfig.antiBlueTickOnReply
-                    ? 'Ketik pesan (Stealth: Balas Tanpa Centang Biru)...'
-                    : 'Ketik pesan...'
+                    ? 'Ketik pesan (Mode Stealth: Balas Tanpa Centang Biru)...'
+                    : `Kirim pesan ke ${activeChat.name}...`
                 }
-                className="w-full px-4 py-2.5 rounded-2xl bg-black/5 dark:bg-white/10 border border-black/5 dark:border-white/10 text-xs md:text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                className="w-full px-4 py-2.5 rounded-2xl ios-glass-subtle text-xs md:text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/60"
               />
             </div>
 
@@ -928,7 +1049,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
               <button
                 type="button"
                 onClick={handleSend}
-                className="w-10 h-10 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white flex items-center justify-center shadow-md shadow-emerald-500/25 active:scale-95 transition-all shrink-0"
+                className="w-10 h-10 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white flex items-center justify-center shadow-lg shadow-emerald-500/30 ios-liquid-btn shrink-0"
                 aria-label="Kirim pesan"
               >
                 <Send className="w-4 h-4 ml-0.5" />
@@ -937,7 +1058,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
               <button
                 type="button"
                 onClick={startRecording}
-                className="w-10 h-10 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20 active:scale-95 transition-all shrink-0"
+                className="w-10 h-10 rounded-2xl ios-glass-subtle text-emerald-600 dark:text-emerald-400 flex items-center justify-center ios-liquid-btn shrink-0"
                 title="Rekam Voice Note"
                 aria-label="Rekam pesan suara"
               >
