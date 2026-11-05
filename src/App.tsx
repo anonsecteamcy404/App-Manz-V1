@@ -54,8 +54,8 @@ const MainApp: React.FC = () => {
       />
 
       {/* Main View Area */}
-      <main className="relative z-10 flex-1 flex w-full max-w-[1640px] mx-auto p-2 sm:p-3 md:p-4 overflow-hidden min-h-0">
-        <div className="w-full flex-1 flex rounded-[28px] ios-glass-card overflow-hidden min-h-0">
+      <main className="relative z-10 flex-1 flex w-full max-w-[1640px] mx-auto p-1 sm:p-3 md:p-4 overflow-hidden min-h-0">
+        <div className="w-full flex-1 flex rounded-[18px] sm:rounded-[28px] ios-glass-card overflow-hidden min-h-0">
           {currentTab === 'chats' && (
             <div className="w-full h-full flex overflow-hidden">
               {/* Chat list (hidden on small screens if active chat is open) */}
