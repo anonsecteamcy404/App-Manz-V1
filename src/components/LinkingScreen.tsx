@@ -5,12 +5,14 @@ import {
   QrCode,
   KeyRound,
   ShieldCheck,
-  ArrowRight,
   RefreshCw,
   CheckCircle2,
   Laptop,
   Radio,
-  Flame,
+  EyeOff,
+  Zap,
+  Lock,
+  Download,
 } from 'lucide-react';
 
 export const LinkingScreen: React.FC = () => {
@@ -19,7 +21,6 @@ export const LinkingScreen: React.FC = () => {
     syncProgress,
     syncStatusText,
     pairingCode,
-    startPairing,
     startRealWhatsAppBackend,
     realQrCodeDataUrl,
     realBackendStatus,
@@ -28,24 +29,23 @@ export const LinkingScreen: React.FC = () => {
     setDarkMode,
   } = useWhatsApp();
 
-  const [connectionMode, setConnectionMode] = useState<'real' | 'demo'>('real');
   const [activeTab, setActiveTab] = useState<'qr' | 'code'>('qr');
   const [phoneNumberInput, setPhoneNumberInput] = useState(phoneInfo.phoneNumber);
   const [qrTimer, setQrTimer] = useState(60);
   const [isCopied, setIsCopied] = useState(false);
   const [isLoadingRealQr, setIsLoadingRealQr] = useState(false);
 
-  // Auto-request real QR when in 'real' mode
+  // Auto-request real QR when disconnected
   useEffect(() => {
-    if (connectionMode === 'real' && connectionState === 'disconnected' && !realQrCodeDataUrl) {
+    if (connectionState === 'disconnected' && !realQrCodeDataUrl) {
       setIsLoadingRealQr(true);
       fetch('/api/whatsapp/start', { method: 'POST' })
         .then(() => setIsLoadingRealQr(false))
         .catch(() => setIsLoadingRealQr(false));
     }
-  }, [connectionMode, connectionState, realQrCodeDataUrl]);
+  }, [connectionState, realQrCodeDataUrl]);
 
-  // Countdown timer
+  // Countdown timer for QR refresh
   useEffect(() => {
     if (connectionState !== 'disconnected') return;
     const timer = setInterval(() => {
@@ -55,6 +55,7 @@ export const LinkingScreen: React.FC = () => {
   }, [connectionState]);
 
   const handleCopyCode = () => {
+    if (!pairingCode) return;
     navigator.clipboard?.writeText(pairingCode);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
@@ -66,6 +67,14 @@ export const LinkingScreen: React.FC = () => {
     fetch('/api/whatsapp/start', { method: 'POST' })
       .then(() => setIsLoadingRealQr(false))
       .catch(() => setIsLoadingRealQr(false));
+  };
+
+  const handleRequestPairingCode = () => {
+    if (!phoneNumberInput.trim()) return;
+    setIsLoadingRealQr(true);
+    startRealWhatsAppBackend(phoneNumberInput.trim()).finally(() => {
+      setIsLoadingRealQr(false);
+    });
   };
 
   return (
@@ -83,13 +92,15 @@ export const LinkingScreen: React.FC = () => {
           </div>
           <div>
             <h1 className="text-sm font-bold tracking-tight text-white flex items-center gap-2">
-              WhatsApp iGlass
+              WhatsApp iGlass Mod Pro
               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
                 <Radio className="w-2.5 h-2.5 text-emerald-400 animate-pulse" />
-                Backend Baileys Real Aktif
+                100% Real Multi-Device Engine
               </span>
             </h1>
-            <p className="text-xs text-slate-400">Hubungkan sesi aman & ekspor otomatis</p>
+            <p className="text-xs text-slate-400">
+              Anti-Centang Biru · Buka 1x Lihat · Chat Boom · Proteksi Anti-Ban & Anti-Limit
+            </p>
           </div>
         </div>
 
@@ -137,55 +148,47 @@ export const LinkingScreen: React.FC = () => {
 
             <div className="mt-8 flex items-center gap-2 text-xs text-slate-400">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Enkripsi end-to-end terverifikasi oleh protokol Signal</span>
+              <span>Enkripsi end-to-end terverifikasi oleh protokol Signal WhatsApp</span>
             </div>
           </div>
         ) : (
-          /* Normal QR / Pairing Code Selection */
+          /* Real QR / Pairing Code Selection */
           <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
             {/* Left Column: Instructions & Tab switch */}
             <div className="md:col-span-7 space-y-5">
-              {/* Connection Mode Selector (Real vs Demo) */}
-              <div className="p-1 rounded-2xl bg-black/40 border border-white/15 flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setConnectionMode('real')}
-                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                    connectionMode === 'real'
-                      ? 'bg-emerald-500 text-white shadow-md'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping" />
-                  <span>Koneksi WhatsApp Asli (Real HP)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConnectionMode('demo')}
-                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                    connectionMode === 'demo'
-                      ? 'bg-emerald-500 text-white shadow-md'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Flame className="w-3.5 h-3.5 text-amber-300" />
-                  <span>Mode Demo Interaktif</span>
-                </button>
+              {/* Feature Highlights Banner */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 flex flex-col gap-1">
+                  <EyeOff className="w-4 h-4 text-emerald-400" />
+                  <span className="text-[11px] font-bold text-white">Anti Centang Biru</span>
+                  <span className="text-[10px] text-slate-400">Buka & balas tetap abu-abu</span>
+                </div>
+                <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 flex flex-col gap-1">
+                  <Lock className="w-4 h-4 text-teal-400" />
+                  <span className="text-[11px] font-bold text-white">Buka 1x Lihat</span>
+                  <span className="text-[10px] text-slate-400">Simpan foto/video 1x lihat</span>
+                </div>
+                <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 flex flex-col gap-1">
+                  <Zap className="w-4 h-4 text-amber-400" />
+                  <span className="text-[11px] font-bold text-white">Chat Boom</span>
+                  <span className="text-[10px] text-slate-400">Kirim pesan berulang otomatis</span>
+                </div>
+                <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 flex flex-col gap-1">
+                  <Download className="w-4 h-4 text-sky-400" />
+                  <span className="text-[11px] font-bold text-white">Unduh Status</span>
+                  <span className="text-[10px] text-slate-400">Simpan story & anti-ban</span>
+                </div>
               </div>
 
               <div>
                 <span className="text-xs uppercase tracking-wider font-semibold text-emerald-400">
-                  {connectionMode === 'real'
-                    ? 'Protokol Multi-Device WhatsApp Asli'
-                    : 'Pratinjau Antarmuka Demo'}
+                  Koneksi Langsung WhatsApp Multi-Device (Tanpa Simulasi/Demo)
                 </span>
                 <h2 className="text-2xl md:text-3xl font-extrabold text-white mt-1 tracking-tight">
-                  Tautkan WhatsApp ke Layar Ini
+                  Tautkan WhatsApp Asli Anda
                 </h2>
                 <p className="text-xs md:text-sm text-slate-300 mt-2 leading-relaxed">
-                  {connectionMode === 'real'
-                    ? 'Pindai kode QR asli di sebelah kanan dengan kamera WhatsApp di ponsel Anda (Pengaturan > Perangkat Tertaut > Tautkan Perangkat).'
-                    : 'Jelajahi antarmuka iOS Glass, kirim pesan simulasi, dan uji fitur pencadangan otomatis tanpa perlu HP saat ini.'}
+                  Pindai kode QR asli di sebelah kanan menggunakan kamera WhatsApp di HP Anda, atau tautkan menggunakan kode angka 8 digit. Semua obrolan, status, dan media disinkronkan secara real-time.
                 </p>
               </div>
 
@@ -257,130 +260,97 @@ export const LinkingScreen: React.FC = () => {
               ) : (
                 <div className="space-y-3">
                   <div className="space-y-1">
-                    <label className="text-xs text-slate-300 font-medium">Nomor WhatsApp Anda</label>
-                    <input
-                      type="text"
-                      value={phoneNumberInput}
-                      onChange={(e) => setPhoneNumberInput(e.target.value)}
-                      placeholder="+62 812-xxxx-xxxx"
-                      className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400 text-xs font-mono"
-                    />
+                    <label className="text-xs text-slate-300 font-medium">
+                      Masukkan Nomor WhatsApp Aktif (Gunakan kode negara, misal: 62812xxxx)
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={phoneNumberInput}
+                        onChange={(e) => setPhoneNumberInput(e.target.value)}
+                        placeholder="6281234567890"
+                        className="flex-1 px-4 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400 text-xs font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRequestPairingCode}
+                        disabled={isLoadingRealQr}
+                        className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold transition-all shrink-0"
+                      >
+                        Minta Kode
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 p-3 rounded-2xl bg-black/30 border border-white/15">
-                    <span className="text-lg md:text-xl font-mono font-extrabold tracking-widest text-emerald-300">
-                      {pairingCode}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleCopyCode}
-                      className="ml-auto px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-medium text-slate-200 transition-all flex items-center gap-1.5"
-                    >
-                      {isCopied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : null}
-                      {isCopied ? 'Tersalin' : 'Salin'}
-                    </button>
-                  </div>
+                  {pairingCode ? (
+                    <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-black/40 border border-emerald-500/30">
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wider text-slate-400 block">
+                          Kode Tautan WhatsApp Anda:
+                        </span>
+                        <span className="text-lg md:text-2xl font-mono font-extrabold tracking-widest text-emerald-300">
+                          {pairingCode}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCopyCode}
+                        className="ml-auto px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-medium text-slate-200 transition-all flex items-center gap-1.5"
+                      >
+                        {isCopied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : null}
+                        {isCopied ? 'Tersalin' : 'Salin Kode'}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400">
+                      Ketik nomor WhatsApp Anda lalu klik <strong>Minta Kode</strong> untuk mendapatkan 8 digit kode tautan resmi dari server WhatsApp.
+                    </p>
+                  )}
                 </div>
               )}
 
-              {/* Action Trigger Buttons */}
+              {/* Action Trigger Button */}
               <div className="pt-2 flex flex-col sm:flex-row gap-3">
-                {connectionMode === 'real' ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (activeTab === 'code') {
-                        startRealWhatsAppBackend(phoneNumberInput);
-                      } else {
-                        handleRefreshQr();
-                      }
-                    }}
-                    className="flex-1 px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-semibold text-xs shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRealQr ? 'animate-spin' : ''}`} />
-                    <span>{isLoadingRealQr ? 'Menghubungkan ke WhatsApp...' : 'Perbarui QR WhatsApp Asli'}</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => startPairing(activeTab)}
-                    className="flex-1 px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-semibold text-xs shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
-                  >
-                    <span>Masuk Mode Demo Langsung</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                )}
-
-                {connectionMode === 'real' && (
-                  <button
-                    type="button"
-                    onClick={() => startPairing('qr')}
-                    className="px-4 py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-semibold border border-white/15 transition-all text-center"
-                    title="Uji coba langsung jika HP sedang tidak di dekat Anda"
-                  >
-                    Coba Demo Tanpa HP
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (activeTab === 'code') {
+                      handleRequestPairingCode();
+                    } else {
+                      handleRefreshQr();
+                    }
+                  }}
+                  className="flex-1 px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-semibold text-xs shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRealQr ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isLoadingRealQr
+                      ? 'Menghubungkan ke Server WhatsApp...'
+                      : activeTab === 'code'
+                      ? 'Perbarui Kode Tautan Nomor HP'
+                      : 'Perbarui Kode QR WhatsApp Asli'}
+                  </span>
+                </button>
               </div>
             </div>
 
-            {/* Right Column: Visual QR Code or Pairing Graphic */}
+            {/* Right Column: Visual QR Code */}
             <div className="md:col-span-5 flex flex-col items-center justify-center">
               <div className="relative p-6 rounded-3xl bg-white/95 dark:bg-slate-900/90 shadow-2xl border border-white/30 backdrop-blur-xl flex flex-col items-center text-center">
                 {/* QR Code Canvas */}
-                <div className="relative w-56 h-56 rounded-2xl p-2 bg-white flex items-center justify-center overflow-hidden border border-slate-200 shadow-inner">
+                <div className="relative w-60 h-60 rounded-2xl p-2 bg-white flex items-center justify-center overflow-hidden border border-slate-200 shadow-inner">
                   {realQrCodeDataUrl ? (
-                    /* Real QR Code generated by Baileys WhatsApp Server! */
                     <img
                       src={realQrCodeDataUrl}
                       alt="Kode QR WhatsApp Asli"
                       className="w-full h-full object-contain"
                     />
                   ) : (
-                    /* Fallback / Loading QR Code */
-                    <div className="relative w-full h-full flex items-center justify-center">
-                      <svg
-                        viewBox="0 0 100 100"
-                        className="w-full h-full text-slate-900 opacity-90"
-                        fill="currentColor"
-                      >
-                        <rect x="5" y="5" width="28" height="28" rx="4" fill="#0f172a" />
-                        <rect x="9" y="9" width="20" height="20" rx="2" fill="#ffffff" />
-                        <rect x="13" y="13" width="12" height="12" rx="2" fill="#059669" />
-
-                        <rect x="67" y="5" width="28" height="28" rx="4" fill="#0f172a" />
-                        <rect x="71" y="9" width="20" height="20" rx="2" fill="#ffffff" />
-                        <rect x="75" y="13" width="12" height="12" rx="2" fill="#059669" />
-
-                        <rect x="5" y="67" width="28" height="28" rx="4" fill="#0f172a" />
-                        <rect x="9" y="71" width="20" height="20" rx="2" fill="#ffffff" />
-                        <rect x="13" y="75" width="12" height="12" rx="2" fill="#059669" />
-
-                        <rect x="38" y="10" width="6" height="6" rx="1" fill="#0f172a" />
-                        <rect x="48" y="8" width="6" height="6" rx="1" fill="#0f172a" />
-                        <rect x="38" y="22" width="6" height="6" rx="1" fill="#0f172a" />
-                        <rect x="52" y="24" width="6" height="6" rx="1" fill="#059669" />
-
-                        <rect x="10" y="40" width="6" height="6" rx="1" fill="#0f172a" />
-                        <rect x="22" y="42" width="6" height="6" rx="1" fill="#059669" />
-                        <rect x="40" y="40" width="20" height="20" rx="4" fill="#059669" />
-                        <circle cx="50" cy="50" r="5" fill="#ffffff" />
-
-                        <rect x="68" y="42" width="6" height="6" rx="1" fill="#0f172a" />
-                        <rect x="80" y="40" width="6" height="6" rx="1" fill="#0f172a" />
-                        <rect x="72" y="52" width="6" height="6" rx="1" fill="#059669" />
-
-                        <rect x="40" y="70" width="8" height="8" rx="1" fill="#0f172a" />
-                        <rect x="55" y="72" width="8" height="8" rx="1" fill="#0f172a" />
-                        <rect x="48" y="84" width="8" height="8" rx="1" fill="#059669" />
-                        <rect x="70" y="70" width="6" height="6" rx="1" fill="#0f172a" />
-                        <rect x="82" y="82" width="12" height="12" rx="2" fill="#0f172a" />
-                      </svg>
-                      {isLoadingRealQr && (
-                        <div className="absolute inset-0 bg-white/80 backdrop-blur-xs flex flex-col items-center justify-center text-emerald-600">
-                          <RefreshCw className="w-8 h-8 animate-spin" />
-                          <span className="text-[11px] font-bold mt-2">Mengambil QR Asli...</span>
-                        </div>
-                      )}
+                    <div className="relative w-full h-full flex flex-col items-center justify-center text-slate-700 p-4">
+                      <RefreshCw className="w-8 h-8 text-emerald-600 animate-spin mb-2" />
+                      <span className="text-xs font-bold text-slate-800">Menyiapkan QR Asli...</span>
+                      <span className="text-[11px] text-slate-500 mt-1">
+                        Menghubungi WebSocket Multi-Device WhatsApp
+                      </span>
                     </div>
                   )}
 
@@ -392,14 +362,14 @@ export const LinkingScreen: React.FC = () => {
                 <div className="mt-4 flex items-center justify-between w-full text-xs text-slate-500 dark:text-slate-400">
                   <span className="flex items-center gap-1.5 font-medium">
                     <RefreshCw className="w-3.5 h-3.5 text-emerald-500" />
-                    Segarkan ({qrTimer}d)
+                    Otomatis segarkan ({qrTimer}d)
                   </span>
                   <button
                     type="button"
                     onClick={handleRefreshQr}
                     className="text-emerald-500 hover:text-emerald-400 font-semibold text-xs"
                   >
-                    Muat Ulang
+                    Muat Ulang QR
                   </button>
                 </div>
               </div>
@@ -420,7 +390,7 @@ export const LinkingScreen: React.FC = () => {
                     ? 'WhatsApp Asli Terhubung!'
                     : realBackendStatus === 'qr_ready'
                     ? 'QR Asli Siap Dipindai'
-                    : 'Backend Multi-Device Siap'}
+                    : 'Socket Multi-Device Siap'}
                 </span>
               </div>
             </div>
@@ -429,10 +399,9 @@ export const LinkingScreen: React.FC = () => {
       </main>
 
       {/* Footer info */}
-      <footer className="relative z-10 text-xs text-slate-400 text-center max-w-xl">
+      <footer className="relative z-10 text-xs text-slate-400 text-center max-w-2xl">
         <p>
-          iGlass WA Companion mendukung protokol WhatsApp Multi-Device resmi via WebSocket terenkripsi.
-          Riwayat obrolan, kontak, dan berkas media disinkronkan langsung ke komputer lokal Anda tanpa perantara server pihak ketiga.
+          iGlass WA Companion menggunakan protokol resmi WhatsApp Multi-Device dengan mesin <strong>Stealth Privacy Mod</strong> & <strong>Anti-Ban Shield</strong>. Sesi tersimpan aman di perangkat Anda.
         </p>
       </footer>
     </div>

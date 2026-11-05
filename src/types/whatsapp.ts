@@ -7,6 +7,7 @@ export interface MediaAttachment {
   duration?: string; // For audio/video
   mimeType: string;
   thumbnailUrl?: string;
+  isViewOnce?: boolean; // 1x Lihat (View Once) unlocked by Mod
   locationDetails?: {
     name: string;
     address: string;
@@ -31,6 +32,8 @@ export interface Message {
   timestamp: string; // ISO or HH:mm
   fullTimestamp: string;
   status: 'sent' | 'delivered' | 'read';
+  isViewOnce?: boolean; // 1x Lihat message
+  isRevoked?: boolean; // Anti-Delete (Pesan ditarik tapi tetap tersimpan)
   attachments?: MediaAttachment[];
   reactions?: MessageReaction[];
   replyTo?: {
@@ -69,12 +72,14 @@ export interface Chat {
 
 export interface StatusStoryItem {
   id: string;
-  type: 'image' | 'text';
-  content: string; // image url or text
+  type: 'image' | 'video' | 'text';
+  content: string; // image/video data url or text
   bgColor?: string;
   caption?: string;
   timestamp: string;
   seen: boolean;
+  fileName?: string;
+  mimeType?: string;
 }
 
 export interface StatusStory {
@@ -99,7 +104,7 @@ export interface CallRecord {
 
 export interface LinkedDeviceSession {
   id: string;
-  name: string; // e.g. "MacBook Pro (Chrome)"
+  name: string;
   os: string;
   browser: string;
   location: string;
@@ -116,7 +121,7 @@ export interface AutoExportConfig {
   includeDocuments: boolean;
   format: 'zip' | 'json' | 'txt' | 'html';
   destination: 'local_download' | 'indexeddb_cache' | 'cloud_sync_sim';
-  selectedChatIds: string[]; // empty means all chats
+  selectedChatIds: string[];
   lastExportTimestamp?: number;
   autoDownloadZip: boolean;
 }
@@ -138,11 +143,39 @@ export interface ExportRecord {
 }
 
 export interface ExportFilter {
-  chatId?: string; // if not set, exports all
+  chatId?: string;
   format: 'zip' | 'json' | 'txt' | 'html';
   includeMedia: boolean;
   includeVoiceNotes: boolean;
   includeDocuments: boolean;
   dateFrom?: string;
   dateTo?: string;
+}
+
+export interface ModConfig {
+  antiBlueTick: boolean; // Jangan kirim centang biru saat buka chat
+  antiBlueTickOnReply: boolean; // Jangan kirim centang biru meskipun sudah membalas chat
+  antiViewOnce: boolean; // Buka & simpan otomatis semua foto/video 1x lihat
+  autoSaveStatus: boolean; // Simpan & unduh status otomatis tanpa ketahuan
+  antiRevokeMessage: boolean; // Anti-tarik pesan (pesan dihapus pengirim tetap terbaca)
+  hideOnlineStatus: boolean; // Sembunyikan status Online / Typing (Ghost Mode)
+  antiBanGuard: {
+    enabled: boolean;
+    humanTypingSimulation: boolean; // Simulasi mengetik manusia sebelum kirim
+    adaptiveJitterDelay: boolean; // Jeda acak dinamis antar pesan (1.2s - 3.4s)
+    invisibleZeroWidthVariation: boolean; // Sisipkan variasi karakter zero-width tak terlihat agar hash unik & tidak dianggap spam
+    autoWarmupNewContacts: boolean; // Presence subscribe & delay otomatis saat kirim ke nomor baru
+    minDelayMs: number;
+    maxDelayMs: number;
+  };
+}
+
+export interface BoomJobStatus {
+  isRunning: boolean;
+  chatId: string;
+  text?: string;
+  total: number;
+  sent: number;
+  currentDelayMs: number;
+  lastError: string | null;
 }

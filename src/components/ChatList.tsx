@@ -11,13 +11,19 @@ import {
   MoreVertical,
   Download,
   Trash2,
+  UserPlus,
+  LockOpen,
+  ShieldCheck,
+  Video,
+  X,
 } from 'lucide-react';
 
 interface ChatListProps {
   onExportChat: (chatId: string) => void;
+  onOpenChatMobile?: () => void;
 }
 
-export const ChatList: React.FC<ChatListProps> = ({ onExportChat }) => {
+export const ChatList: React.FC<ChatListProps> = ({ onExportChat, onOpenChatMobile }) => {
   const {
     chats,
     activeChatId,
@@ -25,11 +31,27 @@ export const ChatList: React.FC<ChatListProps> = ({ onExportChat }) => {
     togglePinChat,
     toggleMuteChat,
     deleteChat,
+    startNewChatByPhone,
   } = useWhatsApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'unread' | 'groups'>('all');
   const [menuOpenChatId, setMenuOpenChatId] = useState<string | null>(null);
+
+  // New phone chat modal state (Anti-Limit)
+  const [showNewChatForm, setShowNewChatForm] = useState(false);
+  const [newPhoneInput, setNewPhoneInput] = useState('');
+  const [newNameInput, setNewNameInput] = useState('');
+
+  const handleCreateNewChat = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPhoneInput.trim()) return;
+    startNewChatByPhone(newPhoneInput.trim(), newNameInput.trim() || undefined);
+    setNewPhoneInput('');
+    setNewNameInput('');
+    setShowNewChatForm(false);
+    onOpenChatMobile?.();
+  };
 
   // Filter chats
   const filteredChats = chats
@@ -45,7 +67,6 @@ export const ChatList: React.FC<ChatListProps> = ({ onExportChat }) => {
       return true;
     })
     .sort((a, b) => {
-      // Pinned chats stay top
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
       return 0;
@@ -55,17 +76,72 @@ export const ChatList: React.FC<ChatListProps> = ({ onExportChat }) => {
     <div className="w-full md:w-80 lg:w-96 flex flex-col h-full border-r border-black/5 dark:border-white/10 ios-glass-card shrink-0">
       {/* Search & Filter Header */}
       <div className="p-3.5 space-y-2.5 border-b border-black/5 dark:border-white/10">
-        {/* Search input */}
-        <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari obrolan, kontak, atau pesan..."
-            className="w-full pl-9 pr-4 py-2 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
-          />
+        <div className="flex items-center gap-2">
+          {/* Search input */}
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari obrolan, kontak, atau pesan..."
+              className="w-full pl-9 pr-3 py-2 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+            />
+          </div>
+
+          {/* Start Chat with New Unsaved Number Button */}
+          <button
+            type="button"
+            onClick={() => setShowNewChatForm(!showNewChatForm)}
+            className="p-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 transition-colors shrink-0 flex items-center gap-1 text-xs font-bold"
+            title="Chat Nomor Baru (Anti-Limit Warmup)"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span className="hidden lg:inline">Nomor Baru</span>
+          </button>
         </div>
+
+        {/* Inline New Unsaved Contact Form (Anti-Limit) */}
+        {showNewChatForm && (
+          <form
+            onSubmit={handleCreateNewChat}
+            className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 space-y-2 animate-in fade-in"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-emerald-500 flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Chat Nomor Baru (Anti-Limit Handshake)
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowNewChatForm(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <input
+              type="text"
+              value={newPhoneInput}
+              onChange={(e) => setNewPhoneInput(e.target.value)}
+              placeholder="Nomor WA (cth: 08123456789 / 62812...)"
+              className="w-full px-3 py-1.5 rounded-xl bg-black/20 border border-white/15 text-xs text-white placeholder-slate-400 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-400"
+            />
+            <input
+              type="text"
+              value={newNameInput}
+              onChange={(e) => setNewNameInput(e.target.value)}
+              placeholder="Nama tampilan (opsional)"
+              className="w-full px-3 py-1.5 rounded-xl bg-black/20 border border-white/15 text-xs text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+            />
+            <button
+              type="submit"
+              className="w-full py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold shadow-sm transition-colors"
+            >
+              Buka Ruang Chat Aman
+            </button>
+          </form>
+        )}
 
         {/* Segmented Filter Buttons */}
         <div className="flex items-center gap-1.5 overflow-x-auto">
@@ -78,7 +154,7 @@ export const ChatList: React.FC<ChatListProps> = ({ onExportChat }) => {
                 : 'text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5'
             }`}
           >
-            Semua
+            Semua ({chats.length})
           </button>
           <button
             type="button"
@@ -108,8 +184,20 @@ export const ChatList: React.FC<ChatListProps> = ({ onExportChat }) => {
       {/* Chat rows list */}
       <div className="flex-1 overflow-y-auto divide-y divide-black/5 dark:divide-white/5">
         {filteredChats.length === 0 ? (
-          <div className="py-12 px-6 text-center text-xs text-slate-500 dark:text-slate-400">
-            Tidak ada obrolan yang cocok dengan pencarian.
+          <div className="py-12 px-6 text-center space-y-3">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {chats.length === 0
+                ? 'Belum ada riwayat obrolan yang masuk dari WhatsApp Anda, atau sedang menyinkronkan pesan.'
+                : 'Tidak ada obrolan yang cocok dengan pencarian.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowNewChatForm(true)}
+              className="px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 text-xs font-bold inline-flex items-center gap-1.5"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>Mulai Chat ke Nomor Baru</span>
+            </button>
           </div>
         ) : (
           filteredChats.map((chat) => {
@@ -126,7 +214,10 @@ export const ChatList: React.FC<ChatListProps> = ({ onExportChat }) => {
                     ? 'bg-emerald-500/10 dark:bg-emerald-500/15 border-l-2 border-emerald-500'
                     : 'hover:bg-black/5 dark:hover:bg-white/5'
                 }`}
-                onClick={() => selectChat(chat.id)}
+                onClick={() => {
+                  selectChat(chat.id);
+                  onOpenChatMobile?.();
+                }}
               >
                 {/* Contact Avatar */}
                 <div className="relative shrink-0">
@@ -167,8 +258,14 @@ export const ChatList: React.FC<ChatListProps> = ({ onExportChat }) => {
                               }`}
                             />
                           )}
+                          {lastMsg?.isViewOnce && (
+                            <LockOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          )}
                           {firstAtt?.type === 'image' && (
                             <ImageIcon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          )}
+                          {firstAtt?.type === 'video' && (
+                            <Video className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                           )}
                           {firstAtt?.type === 'audio' && (
                             <Mic className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
@@ -177,7 +274,7 @@ export const ChatList: React.FC<ChatListProps> = ({ onExportChat }) => {
                             <FileText className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                           )}
                           <span className="truncate">
-                            {lastMsg?.text || (firstAtt ? firstAtt.fileName : 'Tidak ada pesan')}
+                            {lastMsg?.text || (firstAtt ? firstAtt.fileName : 'Ketuk untuk mengirim pesan')}
                           </span>
                         </>
                       )}
@@ -192,7 +289,7 @@ export const ChatList: React.FC<ChatListProps> = ({ onExportChat }) => {
                           {chat.unreadCount}
                         </span>
                       )}
-                      
+
                       {/* Context Menu Trigger */}
                       <button
                         type="button"

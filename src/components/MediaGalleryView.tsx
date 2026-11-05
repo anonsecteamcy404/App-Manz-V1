@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useWhatsApp } from '../context/WhatsAppContext';
 import {
-  Image as ImageIcon,
   FileText,
   Mic,
   Download,
@@ -9,14 +8,16 @@ import {
   Square,
   Search,
   Check,
+  LockOpen,
+  Video,
 } from 'lucide-react';
 import { MediaAttachment } from '../types/whatsapp';
 import JSZip from 'jszip';
-import { triggerFileDownload, formatBytes } from '../utils/exporter';
+import { triggerFileDownload } from '../utils/exporter';
 
 export const MediaGalleryView: React.FC = () => {
   const { chats } = useWhatsApp();
-  const [filterType, setFilterType] = useState<'all' | 'image' | 'document' | 'audio'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'viewonce' | 'image' | 'document' | 'audio'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -37,8 +38,15 @@ export const MediaGalleryView: React.FC = () => {
     });
   });
 
+  const viewOnceCount = allMediaItems.filter((i) => i.attachment.isViewOnce).length;
+
   const filteredItems = allMediaItems.filter((item) => {
-    if (filterType !== 'all' && item.attachment.type !== filterType) return false;
+    if (filterType === 'viewonce' && !item.attachment.isViewOnce) return false;
+    if (filterType === 'image' && item.attachment.type !== 'image' && item.attachment.type !== 'video')
+      return false;
+    if (filterType === 'document' && item.attachment.type !== 'document') return false;
+    if (filterType === 'audio' && item.attachment.type !== 'audio') return false;
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const matchName = item.attachment.fileName.toLowerCase().includes(q);
@@ -62,6 +70,22 @@ export const MediaGalleryView: React.FC = () => {
     }
   };
 
+  const downloadSingleAttachment = async (e: React.MouseEvent, att: MediaAttachment) => {
+    e.stopPropagation();
+    try {
+      if (att.url && (att.url.startsWith('/api/media-file/') || att.url.startsWith('http') || att.url.startsWith('blob:'))) {
+        const res = await fetch(att.url);
+        const blob = await res.blob();
+        triggerFileDownload(blob, att.fileName);
+      } else {
+        const blob = new Blob([`Media File: ${att.fileName}`], { type: att.mimeType });
+        triggerFileDownload(blob, att.fileName);
+      }
+    } catch (err) {
+      console.error('Failed to download media:', err);
+    }
+  };
+
   const downloadSelectedBatch = async () => {
     if (selectedIds.length === 0) return;
     setIsDownloading(true);
@@ -72,10 +96,19 @@ export const MediaGalleryView: React.FC = () => {
         selectedIds.includes(i.attachment.id)
       );
 
-      selectedAttachments.forEach(({ attachment, chatName }) => {
-        const payload = `Simulated media attachment from WhatsApp chat with ${chatName}.\nFile: ${attachment.fileName}\nSize: ${attachment.fileSize}\nType: ${attachment.type}`;
-        zip.file(attachment.fileName, payload);
-      });
+      for (const { attachment } of selectedAttachments) {
+        if (attachment.url && (attachment.url.startsWith('/api/media-file/') || attachment.url.startsWith('http') || attachment.url.startsWith('blob:'))) {
+          try {
+            const res = await fetch(attachment.url);
+            const buf = await res.arrayBuffer();
+            zip.file(attachment.fileName, buf);
+          } catch {
+            zip.file(attachment.fileName, `Media file: ${attachment.fileName}`);
+          }
+        } else {
+          zip.file(attachment.fileName, `Media file: ${attachment.fileName}`);
+        }
+      }
 
       const blob = await zip.generateAsync({ type: 'blob' });
       triggerFileDownload(blob, `WhatsApp_Media_Batch_${Date.now()}.zip`);
@@ -91,9 +124,11 @@ export const MediaGalleryView: React.FC = () => {
       {/* Header and Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white">Pusat Media & Berkas</h2>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+            Pusat Media & Pembuka 1x Lihat (View-Once)
+          </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Akses dan unduh foto, dokumen PDF, dan rekaman suara dari seluruh obrolan
+            Semua foto, video, pesan 1x lihat yang dibuka otomatis, dokumen, dan voice note dari chat Anda
           </p>
         </div>
 
@@ -118,7 +153,7 @@ export const MediaGalleryView: React.FC = () => {
             className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 shadow-md shadow-emerald-500/20 transition-all active:scale-95"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>{isDownloading ? 'Mengompres...' : `Unduh Terpilih (${selectedIds.length})`}</span>
+            <span>{isDownloading ? 'Mengompres...' : `Unduh ZIP (${selectedIds.length})`}</span>
           </button>
         </div>
       </div>
@@ -147,6 +182,18 @@ export const MediaGalleryView: React.FC = () => {
             }`}
           >
             Semua ({allMediaItems.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilterType('viewonce')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors flex items-center gap-1 ${
+              filterType === 'viewonce'
+                ? 'bg-amber-500 text-slate-950 shadow-xs'
+                : 'text-amber-500'
+            }`}
+          >
+            <LockOpen className="w-3.5 h-3.5" />
+            <span>1x Lihat ({viewOnceCount})</span>
           </button>
           <button
             type="button"
@@ -185,70 +232,108 @@ export const MediaGalleryView: React.FC = () => {
       </div>
 
       {/* Media Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        {filteredItems.map(({ attachment, chatName, timestamp }) => {
-          const isSelected = selectedIds.includes(attachment.id);
+      {filteredItems.length === 0 ? (
+        <div className="p-12 rounded-3xl ios-glass-card border border-white/15 text-center space-y-2">
+          <p className="text-sm font-bold text-slate-800 dark:text-white">
+            Belum Ada Media Tersimpan di Kategori Ini
+          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+            Setiap foto, video, berkas PDF, maupun pesan <strong>1x Lihat (View Once)</strong> yang dikirim ke WhatsApp Anda akan didekripsi dan ditampilkan secara otomatis di sini.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          {filteredItems.map(({ attachment, chatName }) => {
+            const isSelected = selectedIds.includes(attachment.id);
 
-          return (
-            <div
-              key={attachment.id}
-              className={`group relative p-3 rounded-2xl ios-glass-card border transition-all cursor-pointer ${
-                isSelected
-                  ? 'border-emerald-500 ring-2 ring-emerald-500/30'
-                  : 'border-white/20 hover:border-emerald-500/40'
-              }`}
-              onClick={() => toggleSelect(attachment.id)}
-            >
-              {/* Selection Checkbox */}
-              <div className="absolute top-4 right-4 z-10">
-                <div
-                  className={`w-6 h-6 rounded-lg flex items-center justify-center transition-all ${
-                    isSelected
-                      ? 'bg-emerald-500 text-white shadow-md'
-                      : 'bg-black/40 text-transparent border border-white/40 group-hover:text-white/40'
-                  }`}
-                >
-                  <Check className="w-4 h-4" />
-                </div>
-              </div>
-
-              {/* Preview Thumbnail */}
-              <div className="h-32 rounded-xl bg-black/10 dark:bg-white/5 overflow-hidden flex items-center justify-center relative mb-2.5">
-                {attachment.type === 'image' ? (
-                  <img
-                    src={attachment.url}
-                    alt={attachment.fileName}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                ) : attachment.type === 'document' ? (
-                  <div className="flex flex-col items-center text-red-500">
-                    <FileText className="w-10 h-10" />
-                    <span className="text-[10px] font-bold mt-1 text-slate-700 dark:text-slate-300">PDF</span>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center text-emerald-500">
-                    <Mic className="w-10 h-10" />
-                    <span className="text-[10px] font-bold mt-1 text-slate-700 dark:text-slate-300">
-                      Voice Note
+            return (
+              <div
+                key={attachment.id}
+                className={`group relative p-3 rounded-2xl ios-glass-card border transition-all cursor-pointer ${
+                  isSelected
+                    ? 'border-emerald-500 ring-2 ring-emerald-500/30'
+                    : 'border-white/20 hover:border-emerald-500/40'
+                }`}
+                onClick={() => toggleSelect(attachment.id)}
+              >
+                {/* Top Badges */}
+                <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between">
+                  {attachment.isViewOnce ? (
+                    <span className="px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 text-[10px] font-extrabold flex items-center gap-1 shadow-md">
+                      <LockOpen className="w-3 h-3" /> 1x Lihat
                     </span>
-                  </div>
-                )}
-              </div>
+                  ) : (
+                    <span />
+                  )}
 
-              {/* File Info */}
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-slate-900 dark:text-white truncate" title={attachment.fileName}>
-                  {attachment.fileName}
-                </p>
-                <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
-                  <span className="truncate max-w-[60%]">{chatName}</span>
-                  <span className="font-mono tabular-nums shrink-0">{attachment.fileSize}</span>
+                  <div
+                    className={`w-6 h-6 rounded-lg flex items-center justify-center transition-all ${
+                      isSelected
+                        ? 'bg-emerald-500 text-white shadow-md'
+                        : 'bg-black/40 text-transparent border border-white/40 group-hover:text-white/40'
+                    }`}
+                  >
+                    <Check className="w-4 h-4" />
+                  </div>
+                </div>
+
+                {/* Preview Thumbnail */}
+                <div className="h-36 rounded-xl bg-black/10 dark:bg-white/5 overflow-hidden flex items-center justify-center relative mb-2.5">
+                  {attachment.type === 'image' ? (
+                    <img
+                      src={attachment.url}
+                      alt={attachment.fileName}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : attachment.type === 'video' ? (
+                    <video
+                      src={attachment.url}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : attachment.type === 'document' ? (
+                    <div className="flex flex-col items-center text-red-500">
+                      <FileText className="w-10 h-10" />
+                      <span className="text-[10px] font-bold mt-1 text-slate-700 dark:text-slate-300">Dokumen</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center text-emerald-500">
+                      <Mic className="w-10 h-10" />
+                      <span className="text-[10px] font-bold mt-1 text-slate-700 dark:text-slate-300">
+                        Voice Note
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* File Info & Direct Download */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <p
+                      className="text-xs font-semibold text-slate-900 dark:text-white truncate"
+                      title={attachment.fileName}
+                    >
+                      {attachment.fileName}
+                    </p>
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                      <span className="truncate max-w-[65%]">{chatName}</span>
+                      <span className="font-mono tabular-nums shrink-0">{attachment.fileSize}</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => downloadSingleAttachment(e, attachment)}
+                    className="p-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500 text-emerald-500 hover:text-white transition-colors shrink-0"
+                    title="Unduh Berkas Ini"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

@@ -9,6 +9,7 @@ import { StatusViewerModal } from './components/StatusViewerModal';
 import { CallsView } from './components/CallsView';
 import { CallScreenModal } from './components/CallScreenModal';
 import { MediaGalleryView } from './components/MediaGalleryView';
+import { ModSettingsView } from './components/ModSettingsView';
 import { LinkedDevicesManager } from './components/LinkedDevicesManager';
 import { ExportModal } from './components/ExportModal';
 
@@ -24,7 +25,7 @@ const MainApp: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<MainNavTab>('chats');
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
 
-  // If not yet connected, render the Linked Device pairing screen
+  // If not yet connected, render the Real Linked Device pairing screen
   if (connectionState !== 'connected') {
     return <LinkingScreen />;
   }
@@ -44,10 +45,13 @@ const MainApp: React.FC = () => {
       </div>
 
       {/* Main Top Bar */}
-      <HeaderTopBar currentTab={currentTab} onTabChange={(tab) => {
-        setCurrentTab(tab);
-        setMobileChatOpen(false);
-      }} />
+      <HeaderTopBar
+        currentTab={currentTab}
+        onTabChange={(tab) => {
+          setCurrentTab(tab);
+          setMobileChatOpen(false);
+        }}
+      />
 
       {/* Main View Area */}
       <main className="relative z-10 flex-1 flex w-full max-w-[1600px] mx-auto p-2 sm:p-3 md:p-4 overflow-hidden min-h-0">
@@ -62,6 +66,7 @@ const MainApp: React.FC = () => {
               >
                 <ChatList
                   onExportChat={handleExportChat}
+                  onOpenChatMobile={() => setMobileChatOpen(true)}
                 />
               </div>
 
@@ -74,6 +79,7 @@ const MainApp: React.FC = () => {
                 <ChatConversation
                   onBackMobile={() => setMobileChatOpen(false)}
                   onExportCurrentChat={() => openExportModal('instant')}
+                  onOpenModSettings={() => setCurrentTab('mod')}
                 />
               </div>
             </div>
@@ -84,6 +90,8 @@ const MainApp: React.FC = () => {
           {currentTab === 'calls' && <CallsView />}
 
           {currentTab === 'media' && <MediaGalleryView />}
+
+          {currentTab === 'mod' && <ModSettingsView />}
 
           {currentTab === 'devices' && <LinkedDevicesManager />}
         </div>

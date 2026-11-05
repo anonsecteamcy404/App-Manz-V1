@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useWhatsApp } from '../context/WhatsAppContext';
-import { X, ChevronLeft, ChevronRight, Send, Heart } from 'lucide-react';
+import { X, Send, Heart, Download } from 'lucide-react';
 import { StatusStory } from '../types/whatsapp';
+import { triggerFileDownload } from '../utils/exporter';
 
 interface StatusViewerModalProps {
   story: StatusStory;
@@ -61,6 +62,35 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({ story, onC
     onClose();
   };
 
+  const handleDownloadCurrentStatus = async () => {
+    if (!currentItem) return;
+    setIsPaused(true);
+    try {
+      if (
+        (currentItem.type === 'image' || currentItem.type === 'video') &&
+        currentItem.content.startsWith('/api/media-file/')
+      ) {
+        const res = await fetch(currentItem.content);
+        const blob = await res.blob();
+        const ext = currentItem.type === 'video' ? 'mp4' : 'jpg';
+        triggerFileDownload(
+          blob,
+          currentItem.fileName || `Status_${story.contactName.replace(/\s+/g, '_')}_${Date.now()}.${ext}`
+        );
+      } else {
+        const blob = new Blob(
+          [`Status dari ${story.contactName}\nWaktu: ${currentItem.timestamp}\nIsi: ${currentItem.content}\nCaption: ${currentItem.caption || ''}`],
+          { type: 'text/plain;charset=utf-8' }
+        );
+        triggerFileDownload(blob, `Status_${story.contactName.replace(/\s+/g, '_')}_${Date.now()}.txt`);
+      }
+    } catch (err) {
+      console.error('Status download failed:', err);
+    } finally {
+      setIsPaused(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-xl flex items-center justify-center p-0 md:p-6 select-none animate-in fade-in duration-200">
       <div
@@ -99,14 +129,29 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({ story, onC
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-full bg-black/40 hover:bg-black/60 text-white"
-            aria-label="Tutup status"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDownloadCurrentStatus();
+              }}
+              className="px-3 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg"
+              title="Unduh Status Ini"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Unduh Status</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-full bg-black/40 hover:bg-black/60 text-white"
+              aria-label="Tutup status"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Story Media / Text Area */}
@@ -115,12 +160,19 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({ story, onC
             <img
               src={currentItem.content}
               alt="Status"
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain bg-black"
+            />
+          ) : currentItem?.type === 'video' ? (
+            <video
+              src={currentItem.content}
+              controls
+              autoPlay
+              className="w-full h-full object-contain bg-black"
             />
           ) : (
             <div
               className="w-full h-full flex items-center justify-center p-8 text-center"
-              style={{ backgroundColor: currentItem?.bgColor || '#4f46e5' }}
+              style={{ backgroundColor: currentItem?.bgColor || '#059669' }}
             >
               <p className="text-xl font-bold text-white leading-relaxed">
                 {currentItem?.content}
@@ -132,13 +184,13 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({ story, onC
           <button
             type="button"
             onClick={handlePrev}
-            className="absolute left-0 inset-y-0 w-1/3 z-20 focus:outline-none"
+            className="absolute left-0 inset-y-0 w-1/4 z-20 focus:outline-none"
             aria-label="Status sebelumnya"
           />
           <button
             type="button"
             onClick={handleNext}
-            className="absolute right-0 inset-y-0 w-1/3 z-20 focus:outline-none"
+            className="absolute right-0 inset-y-0 w-1/4 z-20 focus:outline-none"
             aria-label="Status berikutnya"
           />
 
@@ -169,7 +221,7 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({ story, onC
           <button
             type="button"
             onClick={() => {
-              sendMessage(story.contactId, `[Reaksi Status ❤️]`);
+              sendMessage(story.contactId, `❤️`);
               onClose();
             }}
             className="p-2 rounded-full hover:bg-white/20 text-rose-400 transition-colors"

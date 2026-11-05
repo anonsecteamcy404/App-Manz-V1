@@ -10,6 +10,8 @@ import {
   ExportRecord,
   ExportFilter,
   MediaAttachment,
+  ModConfig,
+  BoomJobStatus,
 } from '../types/whatsapp';
 import {
   INITIAL_CHATS,
@@ -43,11 +45,9 @@ interface WhatsAppContextType {
     network: string;
     phoneNumber: string;
   };
-  isRealWhatsAppMode: boolean;
-  setIsRealWhatsAppMode: (val: boolean) => void;
   realQrCodeDataUrl: string | null;
   realBackendStatus: string;
-  realUser: { id: string; name?: string; phone?: string } | null;
+  realUser: { id: string; name?: string; phone?: string; avatar?: string } | null;
   chats: Chat[];
   activeChatId: string | null;
   activeChat: Chat | null;
@@ -57,6 +57,8 @@ interface WhatsAppContextType {
   linkedSessions: LinkedDeviceSession[];
   autoExportConfig: AutoExportConfig;
   exportRecords: ExportRecord[];
+  modConfig: ModConfig;
+  boomStatus: BoomJobStatus;
   isExportModalOpen: boolean;
   exportActiveTab: 'instant' | 'auto' | 'history';
   isMediaGalleryOpen: boolean;
@@ -69,14 +71,17 @@ interface WhatsAppContextType {
     status: 'ringing' | 'connected';
   } | null;
   darkMode: boolean;
-  
+
   // Actions
   setDarkMode: (val: boolean | ((prev: boolean) => boolean)) => void;
-  startPairing: (method: 'qr' | 'code') => void;
   startRealWhatsAppBackend: (phoneNumber?: string) => Promise<void>;
   disconnectDevice: () => void;
   selectChat: (chatId: string) => void;
-  sendMessage: (chatId: string, text: string, attachments?: MediaAttachment[]) => void;
+  startNewChatByPhone: (phone: string, initialName?: string) => string;
+  sendMessage: (chatId: string, text: string, attachments?: MediaAttachment[]) => Promise<void>;
+  startChatBoom: (chatId: string, text: string, count: number) => Promise<{ success: boolean; error?: string }>;
+  stopChatBoom: () => Promise<void>;
+  updateModConfig: (updates: Partial<ModConfig>) => Promise<void>;
   reactToMessage: (chatId: string, messageId: string, emoji: string) => void;
   togglePinChat: (chatId: string) => void;
   toggleMuteChat: (chatId: string) => void;
@@ -95,9 +100,9 @@ interface WhatsAppContextType {
 
 const WhatsAppContext = createContext<WhatsAppContextType | null>(null);
 
-const STORAGE_KEY_CONNECTED = 'iglass_wa_connected';
 const STORAGE_KEY_CONFIG = 'iglass_wa_autoexport_config';
 const STORAGE_KEY_RECORDS = 'iglass_wa_export_records';
+const STORAGE_KEY_MOD = 'iglass_wa_mod_config';
 
 const DEFAULT_CONFIG: AutoExportConfig = {
   enabled: true,
@@ -111,38 +116,43 @@ const DEFAULT_CONFIG: AutoExportConfig = {
   autoDownloadZip: true,
 };
 
-export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Connection state
-  const [connectionState, setConnectionState] = useState<ConnectionState>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY_CONNECTED);
-    return saved === 'true' ? 'connected' : 'disconnected';
-  });
-  const [syncProgress, setSyncProgress] = useState(0);
-  const [syncStatusText, setSyncStatusText] = useState('Menginisialisasi handshake enkripsi...');
-  const [pairingCode, setPairingCode] = useState('W9A4-KQ7P');
+const DEFAULT_MOD_CONFIG: ModConfig = {
+  antiBlueTick: true,
+  antiBlueTickOnReply: true,
+  antiViewOnce: true,
+  autoSaveStatus: true,
+  antiRevokeMessage: true,
+  hideOnlineStatus: false,
+  antiBanGuard: {
+    enabled: true,
+    humanTypingSimulation: true,
+    adaptiveJitterDelay: true,
+    invisibleZeroWidthVariation: true,
+    autoWarmupNewContacts: true,
+    minDelayMs: 1400,
+    maxDelayMs: 3200,
+  },
+};
 
-  // Real WhatsApp Baileys mode states
-  const [isRealWhatsAppMode, setIsRealWhatsAppMode] = useState(true);
+export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [syncStatusText, setSyncStatusText] = useState('Menghubungkan ke soket enkripsi WhatsApp...');
+  const [pairingCode, setPairingCode] = useState('');
+
   const [realQrCodeDataUrl, setRealQrCodeDataUrl] = useState<string | null>(null);
   const [realBackendStatus, setRealBackendStatus] = useState<string>('disconnected');
-  const [realUser, setRealUser] = useState<{ id: string; name?: string; phone?: string } | null>(null);
+  const [realUser, setRealUser] = useState<{ id: string; name?: string; phone?: string; avatar?: string } | null>(null);
 
-  // Device & Phone status
   const [phoneInfo, setPhoneInfo] = useState({
-    model: 'iPhone 16 Pro Max',
-    battery: 88,
-    isCharging: false,
-    network: 'Wi-Fi 5GHz · 140 Mbps',
-    phoneNumber: '+62 812-8899-7721',
+    model: 'Menunggu Perangkat Tertaut',
+    battery: 100,
+    isCharging: true,
+    network: 'WebSocket Terenkripsi',
+    phoneNumber: '',
   });
 
-  // Dark mode
-  const [darkMode, setDarkMode] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return document.documentElement.classList.contains('dark') || true;
-    }
-    return true;
-  });
+  const [darkMode, setDarkMode] = useState<boolean>(true);
 
   useEffect(() => {
     if (darkMode) {
@@ -152,15 +162,34 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [darkMode]);
 
-  // Data states
+  // Real Data States (No fake demo chats)
   const [chats, setChats] = useState<Chat[]>(INITIAL_CHATS);
-  const [activeChatId, setActiveChatId] = useState<string | null>(INITIAL_CHATS[0]?.id || null);
-  const [contacts] = useState<Contact[]>(INITIAL_CONTACTS);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [contacts, setContacts] = useState<Contact[]>(INITIAL_CONTACTS);
   const [stories, setStories] = useState<StatusStory[]>(INITIAL_STORIES);
   const [calls, setCalls] = useState<CallRecord[]>(INITIAL_CALLS);
   const [linkedSessions, setLinkedSessions] = useState<LinkedDeviceSession[]>(INITIAL_LINKED_SESSIONS);
 
-  // Modals & Navigation
+  // Mod & Boom states
+  const [modConfig, setModConfig] = useState<ModConfig>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_MOD);
+      return saved ? { ...DEFAULT_MOD_CONFIG, ...JSON.parse(saved) } : DEFAULT_MOD_CONFIG;
+    } catch {
+      return DEFAULT_MOD_CONFIG;
+    }
+  });
+
+  const [boomStatus, setBoomStatus] = useState<BoomJobStatus>({
+    isRunning: false,
+    chatId: '',
+    total: 0,
+    sent: 0,
+    currentDelayMs: 0,
+    lastError: null,
+  });
+
+  // Modals
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportActiveTab, setExportActiveTab] = useState<'instant' | 'auto' | 'history'>('instant');
   const [isMediaGalleryOpen, setIsMediaGalleryOpen] = useState(false);
@@ -173,7 +202,6 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     status: 'ringing' | 'connected';
   } | null>(null);
 
-  // Auto-export configuration & records
   const [autoExportConfig, setAutoExportConfig] = useState<AutoExportConfig>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_CONFIG);
@@ -192,12 +220,14 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   });
 
-  // Save config changes
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(autoExportConfig));
   }, [autoExportConfig]);
 
-  // Save export history
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_MOD, JSON.stringify(modConfig));
+  }, [modConfig]);
+
   useEffect(() => {
     const toSave = exportRecords.map((rec) => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -207,10 +237,19 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(toSave));
   }, [exportRecords]);
 
-  // Poll real backend status when on linking screen or connected
+  // Sync initial modConfig to server on mount
+  useEffect(() => {
+    fetch('/api/whatsapp/mod-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(modConfig),
+    }).catch(() => {});
+  }, []);
+
+  // Poll real WhatsApp backend state continuously
   useEffect(() => {
     let isMounted = true;
-    const checkBackendStatus = async () => {
+    const pollBackend = async () => {
       try {
         const res = await fetch('/api/whatsapp/status');
         if (!res.ok) return;
@@ -221,102 +260,83 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         if (data.qrCodeDataUrl) {
           setRealQrCodeDataUrl(data.qrCodeDataUrl);
+        } else if (data.status === 'connected') {
+          setRealQrCodeDataUrl(null);
         }
 
         if (data.pairingCode) {
           setPairingCode(data.pairingCode);
         }
 
+        if (data.boomStatus) {
+          setBoomStatus(data.boomStatus);
+        }
+
         if (data.status === 'connected') {
           setConnectionState('connected');
-          localStorage.setItem(STORAGE_KEY_CONNECTED, 'true');
           if (data.user) {
             setRealUser(data.user);
-            setPhoneInfo((prev) => ({
-              ...prev,
-              phoneNumber: data.user.phone || data.user.id.split('@')[0],
-              model: data.user.name ? `${data.user.name} (WhatsApp Asli)` : 'Ponsel WhatsApp Asli',
-            }));
+            setPhoneInfo({
+              model: data.user.name ? `${data.user.name} (Tertaut Real)` : 'WhatsApp Tertaut Real',
+              battery: 96,
+              isCharging: false,
+              network: 'Multi-Device Noise Socket',
+              phoneNumber: data.user.phone || `+${data.user.id.split('@')[0]}`,
+            });
           }
 
-          // Fetch real chats if available
-          try {
-            const chatRes = await fetch('/api/whatsapp/chats');
-            if (chatRes.ok) {
-              const chatData = await chatRes.json();
-              if (chatData.chats && chatData.chats.length > 0) {
-                setChats(chatData.chats);
-              }
+          // Fetch real chats, stories, contacts, calls
+          const chatRes = await fetch('/api/whatsapp/chats');
+          if (chatRes.ok) {
+            const chatData = await chatRes.json();
+            if (Array.isArray(chatData.chats)) {
+              setChats((prev) => {
+                // Merge server chats with any locally initiated unsent chat tabs
+                const serverIds = new Set(chatData.chats.map((c: Chat) => c.id));
+                const localOnly = prev.filter((p) => !serverIds.has(p.id));
+                const merged = [...chatData.chats, ...localOnly];
+                return merged;
+              });
+              setActiveChatId((curr) => curr || chatData.chats[0]?.id || null);
             }
-          } catch (e) {
-            console.error('Error fetching real chats:', e);
+            if (Array.isArray(chatData.contacts)) {
+              setContacts(chatData.contacts);
+            }
+            if (Array.isArray(chatData.stories)) {
+              setStories(chatData.stories);
+            }
+            if (Array.isArray(chatData.calls)) {
+              setCalls(chatData.calls);
+            }
           }
+        } else if (data.status === 'disconnected') {
+          setConnectionState('disconnected');
         }
-      } catch (err) {
-        // Backend not running or offline
-      }
+      } catch {}
     };
 
-    checkBackendStatus();
-    const interval = setInterval(checkBackendStatus, 2500);
+    pollBackend();
+    const interval = setInterval(pollBackend, 1800);
     return () => {
       isMounted = false;
       clearInterval(interval);
     };
   }, []);
 
-  // Start real backend WhatsApp connection
   const startRealWhatsAppBackend = async (phoneNumber?: string) => {
     try {
-      setConnectionState('syncing');
-      setSyncProgress(30);
+      setSyncProgress(35);
       setSyncStatusText('Menghubungkan ke server WhatsApp Meta via Baileys...');
       await fetch('/api/whatsapp/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: phoneNumber }),
       });
-      setSyncProgress(65);
-      setSyncStatusText('Menunggu respon kode QR dari server WhatsApp...');
+      setSyncProgress(75);
+      setSyncStatusText('Menunggu pemindaian QR atau kode tautan...');
     } catch (err) {
       console.error('Failed to trigger real WhatsApp start:', err);
     }
-  };
-
-  // Handle pairing and handshake simulator
-  const startPairing = (_method: 'qr' | 'code') => {
-    setConnectionState('syncing');
-    setSyncProgress(15);
-    setSyncStatusText('Menghubungkan ke server enkripsi WhatsApp Signal...');
-
-    const stages = [
-      { p: 35, text: 'Memverifikasi sesi perangkat tertaut aman...' },
-      { p: 60, text: 'Mengunduh riwayat obrolan & kontak terbaru...' },
-      { p: 85, text: 'Menyelaraskan media, status, dan riwayat panggilan...' },
-      { p: 100, text: 'Selesai! Sesi aman terhubung.' },
-    ];
-
-    stages.forEach((stage, idx) => {
-      setTimeout(() => {
-        setSyncProgress(stage.p);
-        setSyncStatusText(stage.text);
-        if (idx === stages.length - 1) {
-          setTimeout(() => {
-            setConnectionState('connected');
-            localStorage.setItem(STORAGE_KEY_CONNECTED, 'true');
-            // Check auto-export on connect
-            if (autoExportConfig.enabled && autoExportConfig.frequency === 'on_connect') {
-              runExport({
-                format: autoExportConfig.format,
-                includeMedia: autoExportConfig.includeMedia,
-                includeVoiceNotes: autoExportConfig.includeVoiceNotes,
-                includeDocuments: autoExportConfig.includeDocuments,
-              }, 'auto');
-            }
-          }, 600);
-        }
-      }, (idx + 1) * 700);
-    });
   };
 
   const disconnectDevice = async () => {
@@ -325,11 +345,12 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch {}
 
     setConnectionState('disconnected');
-    localStorage.removeItem(STORAGE_KEY_CONNECTED);
     setRealQrCodeDataUrl(null);
     setRealUser(null);
-    const codes = ['P8M2-LX9Q', 'K4N9-RT2Y', 'B7C3-HV6W', 'W9A4-KQ7P'];
-    setPairingCode(codes[Math.floor(Math.random() * codes.length)]);
+    setChats([]);
+    setStories([]);
+    setCalls([]);
+    setActiveChatId(null);
   };
 
   const selectChat = (chatId: string) => {
@@ -337,16 +358,110 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setChats((prev) =>
       prev.map((c) => (c.id === chatId ? { ...c, unreadCount: 0 } : c))
     );
+    // Notify server we opened the chat (server respects antiBlueTick!)
+    fetch('/api/whatsapp/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId }),
+    }).catch(() => {});
   };
 
-  // Run Export logic
+  // Start a new chat with any phone number (even unsaved numbers!)
+  const startNewChatByPhone = (rawPhone: string, initialName?: string): string => {
+    const cleaned = rawPhone.replace(/[^0-9]/g, '');
+    const normalized = cleaned.startsWith('0') ? `62${cleaned.slice(1)}` : cleaned;
+    const jid = `${normalized}@s.whatsapp.net`;
+    const displayName = initialName?.trim() || `+${normalized}`;
+
+    setChats((prev) => {
+      if (prev.some((c) => c.id === jid)) return prev;
+      const newChat: Chat = {
+        id: jid,
+        name: displayName,
+        isGroup: false,
+        avatar: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="%2310b981"/><text x="50" y="58" font-size="30" font-weight="bold" fill="white" font-family="sans-serif" text-anchor="middle">WA</text></svg>`,
+        unreadCount: 0,
+        isPinned: true,
+        isArchived: false,
+        isMuted: false,
+        messages: [],
+        lastMessage: {
+          id: `init_${Date.now()}`,
+          chatId: jid,
+          senderId: 'me',
+          senderName: 'Anda',
+          isOutgoing: true,
+          text: 'Obrolan baru siap dikirim (Anti-Ban Warmup Aktif)',
+          timestamp: 'Baru',
+          fullTimestamp: '',
+          status: 'read',
+        },
+      };
+      return [newChat, ...prev];
+    });
+
+    setActiveChatId(jid);
+    return jid;
+  };
+
+  const updateModConfig = async (updates: Partial<ModConfig>) => {
+    const nextConfig: ModConfig = {
+      ...modConfig,
+      ...updates,
+      antiBanGuard: {
+        ...modConfig.antiBanGuard,
+        ...(updates.antiBanGuard || {}),
+      },
+    };
+    setModConfig(nextConfig);
+    try {
+      await fetch('/api/whatsapp/mod-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(nextConfig),
+      });
+    } catch {}
+  };
+
+  const startChatBoom = async (
+    chatId: string,
+    text: string,
+    count: number
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/whatsapp/boom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, text, count }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Gagal menjalankan Chat Boom' };
+      }
+      if (data.boomStatus) {
+        setBoomStatus(data.boomStatus);
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Koneksi ke server gagal' };
+    }
+  };
+
+  const stopChatBoom = async () => {
+    try {
+      const res = await fetch('/api/whatsapp/boom/stop', { method: 'POST' });
+      const data = await res.json();
+      if (data.boomStatus) setBoomStatus(data.boomStatus);
+    } catch {}
+  };
+
   const runExport = async (filter: ExportFilter, triggerType: 'manual' | 'auto' = 'manual') => {
     try {
       const selectedChats = filter.chatId
         ? chats.filter((c) => c.id === filter.chatId)
-        : (autoExportConfig.selectedChatIds.length > 0
-            ? chats.filter((c) => autoExportConfig.selectedChatIds.includes(c.id))
-            : chats);
+        : autoExportConfig.selectedChatIds.length > 0
+        ? chats.filter((c) => autoExportConfig.selectedChatIds.includes(c.id))
+        : chats;
 
       const targetChat = filter.chatId ? chats.find((c) => c.id === filter.chatId) : null;
       const targetLabel = targetChat ? targetChat.name : `Semua Obrolan (${selectedChats.length})`;
@@ -359,9 +474,7 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           triggerType,
           chatName: targetLabel,
         };
-
         setExportRecords((prev) => [enrichedRecord, ...prev]);
-
         if (autoExportConfig.autoDownloadZip || triggerType === 'manual') {
           triggerFileDownload(blob, `WhatsApp_Backup_${targetLabel.replace(/[^a-zA-Z0-9]/g, '_')}_${timestampStr}.zip`);
         }
@@ -449,31 +562,28 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  // Background auto-export interval
   const configRef = useRef(autoExportConfig);
   configRef.current = autoExportConfig;
-  const chatsRef = useRef(chats);
-  chatsRef.current = chats;
 
   useEffect(() => {
     if (connectionState !== 'connected') return;
-
     const interval = setInterval(() => {
       const cfg = configRef.current;
-      if (shouldTriggerAutoExport(cfg.lastExportTimestamp, cfg)) {
-        runExport({
-          format: cfg.format,
-          includeMedia: cfg.includeMedia,
-          includeVoiceNotes: cfg.includeVoiceNotes,
-          includeDocuments: cfg.includeDocuments,
-        }, 'auto');
+      if (shouldTriggerAutoExport(cfg.lastExportTimestamp, cfg) && chats.length > 0) {
+        runExport(
+          {
+            format: cfg.format,
+            includeMedia: cfg.includeMedia,
+            includeVoiceNotes: cfg.includeVoiceNotes,
+            includeDocuments: cfg.includeDocuments,
+          },
+          'auto'
+        );
       }
     }, 15000);
-
     return () => clearInterval(interval);
-  }, [connectionState]);
+  }, [connectionState, chats.length]);
 
-  // Send message
   const sendMessage = async (chatId: string, text: string, attachments?: MediaAttachment[]) => {
     const now = new Date();
     const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
@@ -503,87 +613,14 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       })
     );
 
-    // If real backend connected, send to WhatsApp server
-    if (realBackendStatus === 'connected') {
-      try {
-        await fetch('/api/whatsapp/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chatId, text }),
-        });
-      } catch (err) {
-        console.error('Failed to send via real WhatsApp backend:', err);
-      }
-    }
-
-    setTimeout(() => {
-      setChats((prev) =>
-        prev.map((c) => {
-          if (c.id !== chatId) return c;
-          return {
-            ...c,
-            messages: c.messages.map((m) => (m.id === newMsg.id ? { ...m, status: 'delivered' } : m)),
-          };
-        })
-      );
-    }, 800);
-
-    setTimeout(() => {
-      setChats((prev) =>
-        prev.map((c) => {
-          if (c.id !== chatId) return c;
-          return {
-            ...c,
-            messages: c.messages.map((m) => (m.id === newMsg.id ? { ...m, status: 'read' } : m)),
-          };
-        })
-      );
-    }, 1800);
-
-    // If simulated chat, trigger auto-reply
-    const targetChat = chats.find((c) => c.id === chatId);
-    if (targetChat && !targetChat.isGroup && realBackendStatus !== 'connected') {
-      setTimeout(() => {
-        setChats((prev) =>
-          prev.map((c) => (c.id === chatId ? { ...c, isTyping: true } : c))
-        );
-
-        setTimeout(() => {
-          const replyTextOptions = [
-            `Siap! Pesanmu sudah tersinkronisasi sempurna di perangkat tertaut iOS Glass.`,
-            `Oke mengerti, terima kasih infonya! Nanti segera aku cek ya.`,
-            `Mantap, sistem cadangan otomatisnya juga langsung aktif dan mencatat log obrolan ini.`,
-            `Noted! Semua media dan voice note juga aman tersimpan di cache lokal.`,
-          ];
-          const chosenReply = replyTextOptions[Math.floor(Math.random() * replyTextOptions.length)];
-          const replyTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-          const replyFullTime = `${new Date().toLocaleDateString('id-ID')}, ${new Date().toLocaleTimeString('id-ID')}`;
-
-          const replyMsg: Message = {
-            id: `reply_${Date.now()}`,
-            chatId,
-            senderId: targetChat.id,
-            senderName: targetChat.name,
-            isOutgoing: false,
-            text: chosenReply,
-            timestamp: replyTime,
-            fullTimestamp: replyFullTime,
-            status: 'read',
-          };
-
-          setChats((prev) =>
-            prev.map((c) => {
-              if (c.id !== chatId) return c;
-              return {
-                ...c,
-                isTyping: false,
-                messages: [...c.messages, replyMsg],
-                lastMessage: replyMsg,
-              };
-            })
-          );
-        }, 2200);
-      }, 1000);
+    try {
+      await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, text }),
+      });
+    } catch (err) {
+      console.error('Failed to send via real WhatsApp backend:', err);
     }
   };
 
@@ -597,14 +634,9 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             if (msg.id !== messageId) return msg;
             const existingReactions = msg.reactions || [];
             const found = existingReactions.find((r) => r.emoji === emoji);
-            let updatedReactions;
-            if (found) {
-              updatedReactions = existingReactions.map((r) =>
-                r.emoji === emoji ? { ...r, count: r.count + 1 } : r
-              );
-            } else {
-              updatedReactions = [...existingReactions, { emoji, count: 1, users: ['me'] }];
-            }
+            const updatedReactions = found
+              ? existingReactions.map((r) => (r.emoji === emoji ? { ...r, count: r.count + 1 } : r))
+              : [...existingReactions, { emoji, count: 1, users: ['me'] }];
             return { ...msg, reactions: updatedReactions };
           }),
         };
@@ -613,15 +645,11 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const togglePinChat = (chatId: string) => {
-    setChats((prev) =>
-      prev.map((c) => (c.id === chatId ? { ...c, isPinned: !c.isPinned } : c))
-    );
+    setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, isPinned: !c.isPinned } : c)));
   };
 
   const toggleMuteChat = (chatId: string) => {
-    setChats((prev) =>
-      prev.map((c) => (c.id === chatId ? { ...c, isMuted: !c.isMuted } : c))
-    );
+    setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, isMuted: !c.isMuted } : c)));
   };
 
   const deleteChat = (chatId: string) => {
@@ -644,10 +672,10 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const startCall = (contactId: string, type: 'audio' | 'video') => {
     const contact = contacts.find((c) => c.id === contactId) || {
       id: contactId,
-      name: 'Kontak WhatsApp',
-      phone: '+62 812-0000-0000',
+      name: `+${contactId.split('@')[0]}`,
+      phone: `+${contactId.split('@')[0]}`,
       about: 'WhatsApp User',
-      avatar: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="%2310b981"/><text x="50" y="58" font-size="32" font-weight="bold" fill="white" font-family="sans-serif" text-anchor="middle">WA</text></svg>',
+      avatar: CURRENT_USER.avatar,
       isOnline: true,
     };
 
@@ -657,22 +685,6 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       startTime: Date.now(),
       status: 'ringing',
     });
-
-    setTimeout(() => {
-      setActiveCall((prev) => (prev ? { ...prev, status: 'connected' } : null));
-    }, 2500);
-
-    const newCall: CallRecord = {
-      id: `call_${Date.now()}`,
-      contactId: contact.id,
-      contactName: contact.name,
-      contactAvatar: contact.avatar,
-      type,
-      direction: 'outgoing',
-      timestamp: 'Baru saja',
-      duration: 'Sedang berlangsung',
-    };
-    setCalls((prev) => [newCall, ...prev]);
   };
 
   const endCall = () => {
@@ -697,8 +709,6 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         syncStatusText,
         pairingCode,
         phoneInfo,
-        isRealWhatsAppMode,
-        setIsRealWhatsAppMode,
         realQrCodeDataUrl,
         realBackendStatus,
         realUser,
@@ -711,6 +721,8 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         linkedSessions,
         autoExportConfig,
         exportRecords,
+        modConfig,
+        boomStatus,
         isExportModalOpen,
         exportActiveTab,
         isMediaGalleryOpen,
@@ -719,11 +731,14 @@ export const WhatsAppProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         activeCall,
         darkMode,
         setDarkMode,
-        startPairing,
         startRealWhatsAppBackend,
         disconnectDevice,
         selectChat,
+        startNewChatByPhone,
         sendMessage,
+        startChatBoom,
+        stopChatBoom,
+        updateModConfig,
         reactToMessage,
         togglePinChat,
         toggleMuteChat,
