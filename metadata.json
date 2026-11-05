@@ -1,0 +1,6 @@
+{
+  "name": "iGlass WA Companion - Linked Device & Auto Exporter",
+  "description": "Aplikasi hubungkan WhatsApp Perangkat Tertaut dengan antarmuka iOS Glassmorphism, akses penuh obrolan, status, media, dan sistem ekspor otomatis otomatis lengkap.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

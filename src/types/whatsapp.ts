@@ -1,0 +1,148 @@
+export interface MediaAttachment {
+  id: string;
+  type: 'image' | 'video' | 'audio' | 'document' | 'location';
+  url: string;
+  fileName: string;
+  fileSize: string;
+  duration?: string; // For audio/video
+  mimeType: string;
+  thumbnailUrl?: string;
+  locationDetails?: {
+    name: string;
+    address: string;
+    lat: number;
+    lng: number;
+  };
+}
+
+export interface MessageReaction {
+  emoji: string;
+  count: number;
+  users: string[];
+}
+
+export interface Message {
+  id: string;
+  chatId: string;
+  senderId: string;
+  senderName: string;
+  isOutgoing: boolean;
+  text: string;
+  timestamp: string; // ISO or HH:mm
+  fullTimestamp: string;
+  status: 'sent' | 'delivered' | 'read';
+  attachments?: MediaAttachment[];
+  reactions?: MessageReaction[];
+  replyTo?: {
+    id: string;
+    senderName: string;
+    text: string;
+  };
+  isStarred?: boolean;
+}
+
+export interface Contact {
+  id: string;
+  name: string;
+  phone: string;
+  about: string;
+  avatar: string;
+  isOnline: boolean;
+  lastSeen?: string;
+}
+
+export interface Chat {
+  id: string;
+  name: string;
+  isGroup: boolean;
+  avatar: string;
+  unreadCount: number;
+  isPinned: boolean;
+  isArchived: boolean;
+  isMuted: boolean;
+  lastMessage: Message;
+  messages: Message[];
+  participants?: string[];
+  groupDescription?: string;
+  isTyping?: boolean;
+}
+
+export interface StatusStoryItem {
+  id: string;
+  type: 'image' | 'text';
+  content: string; // image url or text
+  bgColor?: string;
+  caption?: string;
+  timestamp: string;
+  seen: boolean;
+}
+
+export interface StatusStory {
+  id: string;
+  contactId: string;
+  contactName: string;
+  contactAvatar: string;
+  stories: StatusStoryItem[];
+  updatedAt: string;
+}
+
+export interface CallRecord {
+  id: string;
+  contactId: string;
+  contactName: string;
+  contactAvatar: string;
+  type: 'audio' | 'video';
+  direction: 'incoming' | 'outgoing' | 'missed';
+  timestamp: string;
+  duration?: string;
+}
+
+export interface LinkedDeviceSession {
+  id: string;
+  name: string; // e.g. "MacBook Pro (Chrome)"
+  os: string;
+  browser: string;
+  location: string;
+  lastActive: string;
+  isCurrent: boolean;
+  ipAddress: string;
+}
+
+export interface AutoExportConfig {
+  enabled: boolean;
+  frequency: 'realtime' | 'hourly' | 'daily' | 'on_connect';
+  includeMedia: boolean;
+  includeVoiceNotes: boolean;
+  includeDocuments: boolean;
+  format: 'zip' | 'json' | 'txt' | 'html';
+  destination: 'local_download' | 'indexeddb_cache' | 'cloud_sync_sim';
+  selectedChatIds: string[]; // empty means all chats
+  lastExportTimestamp?: number;
+  autoDownloadZip: boolean;
+}
+
+export interface ExportRecord {
+  id: string;
+  date: string;
+  timestamp: number;
+  chatName: string;
+  format: 'ZIP' | 'JSON' | 'TXT' | 'HTML';
+  messageCount: number;
+  mediaCount: number;
+  fileSizeBytes: number;
+  fileSizeFormatted: string;
+  status: 'completed' | 'in_progress' | 'failed';
+  triggerType: 'auto' | 'manual';
+  downloadUrl?: string;
+  blobData?: Blob;
+}
+
+export interface ExportFilter {
+  chatId?: string; // if not set, exports all
+  format: 'zip' | 'json' | 'txt' | 'html';
+  includeMedia: boolean;
+  includeVoiceNotes: boolean;
+  includeDocuments: boolean;
+  dateFrom?: string;
+  dateTo?: string;
+}
